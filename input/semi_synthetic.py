@@ -14,7 +14,7 @@ class SemiSynthetic():
     - generate_REGAL_synthetic: generate a graph with the algorithms mentioned in REGAL paper.
     - generate_random_clone_synthetic: generate a graph with probability of adding connection and probability of removing connection
     """
-    def __init__(self, networkx_dir, output_dir1, output_dir2=None, groundtruth_dir=None, seed=1):
+    def __init__(self, networkx_dir, output_dir1, output_dir2=None, groundtruth_dir=None, seed=1, weighted=False):
         """
 
         :param networkx_dir: directory contains graph data in networkx format
@@ -26,10 +26,11 @@ class SemiSynthetic():
         self.output_dir2 = output_dir2
         self.groundtruth_dir = groundtruth_dir
         self.seed = seed
+        self.weighted = weighted
     
     def set_seed(self):
-        random.seed = seed
-        np.random.seed = seed
+        random.seed = self.seed
+        np.random.seed = self.seed
 
     def generate_PALE_synthetic(self, alpha_s=0.9, alpha_c=0.9):
         if self.output_dir2 is None:
@@ -96,7 +97,11 @@ class SemiSynthetic():
         features = self._build_features(p_change_feats)
         if features is not None:
             np.save(os.path.join(output_dir,"graphsage/feats.npy"), features)
-        nx.write_edgelist(G, os.path.join(output_dir,"edgelist/edgelist"), delimiter=' ', data=False)
+        
+        if self.weighted:
+            nx.write_weighted_edgelist(G, os.path.join(output_dir,"edgelist/edgelist"), delimiter=' ')
+        else:
+            nx.write_edgelist(G, os.path.join(output_dir,"edgelist/edgelist"), delimiter=' ', data=False)
         print("Graph has been saved to ", self.output_dir1)
 
     def _create_id2idx(self, G):
