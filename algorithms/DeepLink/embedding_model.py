@@ -1,5 +1,9 @@
 from gensim.models import Word2Vec
 import numpy as np
+import pdb
+
+
+from utils.debug_utils import debug_print
 
 
 class DeepWalk:
@@ -36,14 +40,12 @@ class DeepWalk:
         self.num_cores = num_cores
         self.num_epochs = num_epochs
         self.seed = seed
-
-
+    
     def get_embedding(self):
         walks = self.run_random_walks()
-        import pdb
-        pdb.set_trace()
-        embedding_model = Word2Vec(walks, size=self.embedding_dim, window=self.window_size,\
-                            min_count=0, sg=1, hs=1, workers=self.num_cores, iter=self.num_epochs, seed=self.seed)
+        # pdb.set_trace()
+        embedding_model = Word2Vec(walks, vector_size=self.embedding_dim, window=self.window_size,\
+                            min_count=0, sg=1, hs=1, workers=self.num_cores, epochs=self.num_epochs, seed=self.seed)
         embedding = np.zeros((len(self.G.nodes()), self.embedding_dim))
         for i in range(len(self.G.nodes())):
             embedding[i] = embedding_model.wv[str(i)]
@@ -61,7 +63,12 @@ class DeepWalk:
                     continue
                 curr_node = node
                 for j in range(self.walk_len):
-                    next_node = np.random.choice(self.G.neighbors(curr_node))
+
+                    # debug_print(f"curr_node: {curr_node}")
+                    # debug_print(f"neighbors: {list(self.G.neighbors(curr_node))}")
+                    # debug_print(f"next node: {np.random.choice(list(self.G.neighbors(curr_node)))}")
+
+                    next_node = np.random.choice(list(self.G.neighbors(curr_node)))
                     curr_node = next_node
                     if curr_node != node:
                         walk.append(str(self.id2idx[curr_node]))

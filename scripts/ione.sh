@@ -10,6 +10,6 @@ python network_alignment.py \
 --groundtruth ${PD}/dictionaries/node,split=${TRAINRATIO}.test.dict \
 IONE \
 --train_dict ${PD}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---cuda 
+# --cuda 
 
 

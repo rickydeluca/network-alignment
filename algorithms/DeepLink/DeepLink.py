@@ -4,6 +4,7 @@ from algorithms.DeepLink.embedding_model import DeepWalk
 
 from input.dataset import Dataset
 from utils.graph_utils import load_gt
+from utils.debug_utils import debug_print
 
 import numpy as np
 import torch.nn as nn
@@ -12,7 +13,6 @@ import networkx as nx
 
 import argparse
 import time
-
 
 
 class DeepLink(NetworkAlignmentModel):
@@ -167,14 +167,15 @@ class DeepLink(NetworkAlignmentModel):
     def learn_embeddings(self):
         print("Start embedding for source nodes, using deepwalk")
 
-        # for evaluate time
+        # For evaluating time
         start = time.time()
 
         source_embedding_model = DeepWalk(self.source_dataset.G, self.source_dataset.id2idx, self.number_walks, \
                         self.walk_length, self.window_size, self.embedding_dim, self.num_cores, self.embedding_epochs, seed=self.seed)
-
+        
         self.source_embedding = torch.Tensor(source_embedding_model.get_embedding())
-
+        
+        
         self.embedding_epoch_time = time.time() - start
 
         print("Start embedding for target nodes, using deepwalk")
@@ -183,6 +184,7 @@ class DeepLink(NetworkAlignmentModel):
                         self.walk_length, self.window_size, self.embedding_dim, self.num_cores, self.embedding_epochs, seed=self.seed)
 
         self.target_embedding = torch.Tensor(target_embedding_model.get_embedding())
+
         if self.cuda:
             self.source_embedding = self.source_embedding.cuda()
             self.target_embedding = self.target_embedding.cuda()

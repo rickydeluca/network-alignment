@@ -137,7 +137,7 @@ public class IONE {
                 for (String last_id : trgIds) {
                     embedding_2 = trgEmbed.get(last_id+"_trg");
                     cosin_value = BasicUnit.getCosinFast(embedding_1, embedding_2);
-                    cosins[i] = String.valueOf(Double.valueOf(nineDForm.format(cosin_value)));
+                    cosins[i] = String.valueOf(Double.valueOf(nineDForm.format(cosin_value).replace(",",".")));
                     i++;
                 }
                 printContent+=","+String.join(",", cosins);

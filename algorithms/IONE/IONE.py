@@ -45,8 +45,8 @@ class IONE(NetworkAlignmentModel):
         trg_edgelist = self.target_dataset.G.edges()
         src_nodes = self.source_dataset.G.nodes()
         trg_nodes = self.target_dataset.G.nodes()
-        conversion_src = type(self.source_dataset.G.nodes()[0])
-        conversion_trg = type(self.target_dataset.G.nodes()[0])
+        conversion_src = type(list(self.source_dataset.G.nodes())[0])
+        conversion_trg = type(list(self.target_dataset.G.nodes())[0])
         gt, src_map, trg_map = self._read_gt(self.gt_train, conversion_src, conversion_trg)
 
         self._add_missing_nodes(src_map, src_nodes)
