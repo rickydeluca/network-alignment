@@ -1,6 +1,7 @@
 import numpy as np, scipy as sp, networkx as nx
 import math, time, os, sys
 from algorithms.REGAL.models import *
+from utils.debug_utils import debug_print
 
 # Input: graph, RepMethod
 # Output: dictionary of dictionaries: for each node, dictionary containing {node : {layer_num : [list of neighbors]}}
@@ -14,6 +15,7 @@ def get_khop_neighbors(graph, rep_method):
     # only 0-hop neighbor of a node is itself
     # neighbors of a node have nonzero connections to it in adj matrix
     for node in range(graph.N):
+        # debug_print(graph.G_adj[node], exit=True)
         neighbors = np.nonzero(graph.G_adj[node])[-1].tolist()  ###
         if len(neighbors) == 0:  # disconnected node
             print("Warning: node %d is disconnected" % node)

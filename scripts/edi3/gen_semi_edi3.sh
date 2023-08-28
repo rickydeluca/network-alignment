@@ -1,6 +1,5 @@
 PD=dataspace/edi3
 EDGEREMOVAL=(01 05 1 2)
-# TRAINRATIO=(0.2 0.8)
 TRAINRATIO=(0.8)
 
 for ER in "${EDGEREMOVAL[@]}"; do

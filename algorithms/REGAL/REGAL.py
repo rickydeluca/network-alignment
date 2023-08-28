@@ -3,6 +3,7 @@ import json
 import os
 import time
 import numpy as np
+import pdb
 
 import networkx as nx
 from networkx.readwrite import json_graph
@@ -16,9 +17,11 @@ from algorithms.REGAL.xnetmf import *
 from algorithms.REGAL.models import *
 from algorithms.REGAL.alignments import *
 
+from utils.debug_utils import debug_print
+
 from algorithms.network_alignment_model import NetworkAlignmentModel
 from input.dataset import Dataset
-import pdb
+
 
 class REGAL(NetworkAlignmentModel):
 
@@ -42,6 +45,12 @@ class REGAL(NetworkAlignmentModel):
         
         G1 = self.source_dataset.G
         G2 = self.target_dataset.G
+
+        # DEBUG:
+        # print(list(G1.nodes())[:10])
+        # print(list(G2.nodes())[:10])
+        # exit(0)
+
         res1 = json_graph.node_link_data(G1)
         res2 = json_graph.node_link_data(G2)
         id2idx1 = self.source_dataset.id2idx
@@ -65,6 +74,10 @@ class REGAL(NetworkAlignmentModel):
             original_index = id2idx2[node["id"]]
             node["id"] = str(int(original_index) + len(G1.nodes()))
             new_nodes.append(node)
+
+        # DEBUG:
+        # print(new_nodes[:5])
+        # exit(0)
         
         new_id2idx = {}
         for node in new_nodes:
@@ -72,15 +85,15 @@ class REGAL(NetworkAlignmentModel):
         
         new_links = []
         for link in res1["links"]:
-            new_source_index = link["source"]
-            new_target_index = link["target"]
+            new_source_index = new_id2idx[link["source"]]
+            new_target_index = new_id2idx[link["target"]]
             new_links.append({
                 'source': new_source_index,
                 'target': new_target_index
             })
         for link in res2["links"]:
-            new_source_index = link["source"] + len(G1.nodes())
-            new_target_index = link["target"] + len(G1.nodes())
+            new_source_index = id2idx2[link["source"]] + len(G1.nodes())
+            new_target_index = id2idx2[link["target"]] + len(G1.nodes())
             new_links.append({
                 'source': new_source_index,
                 'target': new_target_index
@@ -128,7 +141,7 @@ class REGAL(NetworkAlignmentModel):
         return self.alignment_matrix
 
     def learn_representations(self, adj, feats):
-        graph = Graph(adj = adj, node_attributes = feats)        
+        graph = Graph(adj = adj.todense(), node_attributes = feats)        
         rep_method = RepMethod(max_layer=self.max_layer, alpha=self.alpha, k=self.k, num_buckets=self.num_buckets, normalize=self.normalize, gammastruc=self.gammastruc, gammaattr=self.gammaattr)        
         
         print("Learning representations with max layer %d and alpha = %f" % (self.max_layer, self.alpha))

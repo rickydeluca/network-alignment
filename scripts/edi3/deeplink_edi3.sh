@@ -1,5 +1,5 @@
 PD=dataspace/edi3
-PREFIX=REGAL-d05-seed1
+PREFIX=REGAL-d1-seed1
 TRAINRATIO=0.8
 
 # DeepLink
