@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument('--alignment_matrix_name', default=None, help="Prefered name of alignment matrix.")
     parser.add_argument('--seed',           default=123,    type=int)
 
-    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE')
+    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA')
 
     parser_IsoRank = subparsers.add_parser('IsoRank', help='IsoRank algorithm')
     parser_IsoRank.add_argument('--H',                   default=None, help="Priority matrix")
@@ -104,6 +104,10 @@ def parse_args():
     parser_DeepLink.add_argument('--num_cores',           default=8, type=int)
 
 
+    parser_HDA = subparsers.add_parser('HDA', help='HDA algorithm')
+    parser_HDA.add_argument('--vector_size',              default=10000, type=int)
+
+
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -133,6 +137,8 @@ if __name__ == '__main__':
         model = PALE(source_dataset, target_dataset, args)
     elif algorithm == "DeepLink":
         model = DeepLink(source_dataset, target_dataset, args)
+    elif algorithm == "HDA":
+        model = HDA(source_dataset, target_dataset, vector_size=args.vector_size)
     else:
         raise Exception("Unsupported algorithm")
 

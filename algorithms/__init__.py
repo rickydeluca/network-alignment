@@ -5,6 +5,7 @@ from algorithms.IONE import IONE
 from algorithms.IsoRank import IsoRank
 from algorithms.REGAL import REGAL
 from algorithms.PALE import PALE
+from algorithms.HDA import HDA
 
-__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE']
+__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE', 'HDA']
 
