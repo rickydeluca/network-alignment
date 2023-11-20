@@ -1,6 +1,60 @@
 import copy
 import numpy as np
 import networkx as nx
+import matplotlib.pyplot as plt
+
+from tqdm import tqdm
+from sklearn.metrics import roc_curve, roc_auc_score
+
+
+def similarity_threshold(degree, D, plot=False):
+    """
+    Given the degree of a node A and the hypervector dimensions D,
+    compute the threshold value under which we can say that an other node
+    B is not connected to A.
+
+    To do so, we generate two random gaussian distributions:
+    the first relative to the case of B linked to A,
+    and the other to the case B not linked to A.
+    From these two distribution we create a theoretical ROC curve
+    and from this curve we retrieve the threshold value.
+    """
+    # Generate random samples from two Gaussian distributions
+
+    # Distribution 1 (No edge between A and B)
+    mu1, sigma1 = 0, np.sqrt(degree / D)
+    samples1 = np.random.normal(mu1, sigma1, 1000)
+
+    # Distribution 2 (Edge between A and B)
+    mu2, sigma2 = 1, np.sqrt((degree-1) / D)
+    samples2 = np.random.normal(mu2, sigma2, 1000)
+
+    # Combine the samples from both distributions
+    all_samples = np.concatenate((samples1, samples2))
+    labels = np.concatenate((np.zeros_like(samples1), np.ones_like(samples2)))
+
+    # Calculate ROC curve
+    fpr, tpr, thresholds = roc_curve(labels, all_samples)
+
+    # Calculate AUC score
+    auc = roc_auc_score(labels, all_samples)
+
+    # Plot ROC curve
+    if plot:
+        plt.plot(fpr, tpr, label='ROC curve (AUC = {:.2f})'.format(auc))
+        plt.plot([0, 1], [0, 1], 'k--', label='Random')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver Operating Characteristic (ROC)')
+        plt.legend(loc='lower right')
+        plt.show()
+
+    # Find the threshold value
+    optimal_idx = np.argmax(tpr - fpr)
+    threshold = thresholds[optimal_idx]
+
+    return threshold
+
 
 
 def normalize_vector(array):
@@ -94,7 +148,7 @@ def convert_dict_negatives_to_zero(input_dict):
     return output_dict
 
 
-def generate_hypervector_basis(n_vectors: int, vector_size: int) -> np.ndarray:
+def generate_hypervector_basis(features=None, size: int=None):
     """
     Generate a basis of hypervectors.
     
@@ -102,18 +156,20 @@ def generate_hypervector_basis(n_vectors: int, vector_size: int) -> np.ndarray:
     The elements of the hypervectors are randomly chosen from {-1, 1}.
     
     Args:
-        n_vectors (int):    The number of hypervectors (rows) to generate.
+        features:           The node features for which generate a basis.
 
-        vector_size (int):  The size (dimensionality) of each hypervector
-                            (columns).
+        size (int):         The size of each basis.
 
     Returns:
-        np.ndarray:         A 2D NumPy array of shape (n_vectors, vector_size) 
-                            containing the generated hypervectors.
-                            Each element is randomly chosen from {-1, 1}.
+        dict:               A dictionary in which for each basis is associated
+                            its hyperdimensional basis.
     """
 
-    return np.random.choice([-1, 1], size=(n_vectors, vector_size))
+    basis = {}
+    for feat in features:
+        basis[feat] = np.random.choice([-1, 1], size=size)
+
+    return basis
 
 
 def flip_components(hypervector: np.ndarray, value: float) -> np.ndarray:
@@ -206,92 +262,111 @@ def binarize_hypervector(hypervector):
     return transformed_hypervector
 
 
-def encode_network_hypervectors(G, basis, verbose=False):
+def encode_node_hypervectors(G, basis=None, verbose=False):
     
-    # Compute node features:
+    # Get feature names
+    feature_names = basis.keys()
+
+    # Compute features and store them in a dictionary
+    feature_dict = {}
+
     # - Page Rank
-    page_rank = convert_dict_negatives_to_zero(nx.pagerank(G, alpha=0.85))
-    if verbose:
-        print("============")
-        print("  PageRank  ")
-        print("============")
-        print("Node\tPageRank")
-        for node, rank in page_rank.items():
-            print(f"{node}\t{rank:.4f}")
-        print()
+    if 'page_rank' in feature_names:
+        page_rank = convert_dict_negatives_to_zero(nx.pagerank(G, alpha=0.85))
+        feature_dict['page_rank'] = page_rank
+
+        if verbose:
+            print("============")
+            print("  PageRank  ")
+            print("============")
+            print("Node\tPageRank")
+            for node, rank in page_rank.items():
+                print(f"{node}\t{rank:.4f}")
+            print()
 
     # - Node Degrees
-    node_degree = normalize_dict({node: degree for node, degree in G.degree()})
-    if verbose:
-        print("================")
-        print("  Node Degrees  ")
-        print("================")
-        print("Node\tDegree")
-        for node, degree in node_degree.items():
-            print(f"{node}\t{degree:.4f}")
-        print()
+    if 'node_degree' in feature_names:
+        node_degree = normalize_dict({node: degree for node, degree in G.degree()})
+        feature_dict['node_degree'] = node_degree
+
+        if verbose:
+            print("================")
+            print("  Node Degrees  ")
+            print("================")
+            print("Node\tDegree")
+            for node, degree in node_degree.items():
+                print(f"{node}\t{degree:.4f}")
+            print()
 
     # - Closeness Centralities
-    closeness_centrality = normalize_dict(nx.closeness_centrality(G))
-    if verbose:
-        print("========================")
-        print("  Closeness Centrality  ")
-        print("========================")
-        print("Node\Closeness")
-        for node, value in closeness_centrality.items():
-            print(f"{node}\t{value:.4f}")
-        print()
+    if 'closeness_centrality' in feature_names:
+        closeness_centrality = normalize_dict(nx.closeness_centrality(G))
+        feature_dict['closeness_centrality'] = closeness_centrality
+
+        if verbose:
+            print("========================")
+            print("  Closeness Centrality  ")
+            print("========================")
+            print("Node\Closeness")
+            for node, value in closeness_centrality.items():
+                print(f"{node}\t{value:.4f}")
+            print()
 
     # - Betweenness Centrality
-    betweenness_centrality = normalize_dict(nx.betweenness_centrality(G))
-    if verbose:
-        print("========================")
-        print("  Betweennes Centrality ")
-        print("========================")
-        print("Node\Closeness")
-        for node, value in betweenness_centrality.items():
-            print(f"{node}\t{value:.4f}")
-        print()
+    if 'betweenness_centrality' in feature_names:
+        betweenness_centrality = normalize_dict(nx.betweenness_centrality(G))
+        feature_dict['betweenness_centrality'] = betweenness_centrality
 
-    # - Eigenvector Centrality 
-    eigenvector_centrality = normalize_dict(nx.eigenvector_centrality(G))
-    if verbose:
-        print("========================")
-        print("  Eigenvector Centrality ")
-        print("========================")
-        print("Node\Closeness")
-        for node, value in eigenvector_centrality.items():
-            print(f"{node}\t{value:.4f}")
-        print()
+        if verbose:
+            print("========================")
+            print("  Betweennes Centrality ")
+            print("========================")
+            print("Node\Closeness")
+            for node, value in betweenness_centrality.items():
+                print(f"{node}\t{value:.4f}")
+            print()
+
+    # - Eigenvector Centrality
+    if 'eigenvector_centrality' in feature_names:
+        eigenvector_centrality = normalize_dict(nx.eigenvector_centrality(G))
+        feature_dict['eigenvector_centrality'] = eigenvector_centrality
+
+        if verbose:
+            print("========================")
+            print("  Eigenvector Centrality ")
+            print("========================")
+            print("Node\Closeness")
+            for node, value in eigenvector_centrality.items():
+                print(f"{node}\t{value:.4f}")
+            print()
 
     # - Clustering Coefficient
-    clustering_coefficient = normalize_dict(nx.clustering(G))
-    if verbose:
-        print("========================")
-        print("  Clusteing Coefficient ")
-        print("========================")
-        print("Node\Closeness")
-        for node, value in clustering_coefficient.items():
-            print(f"{node}\t{value:.4f}")
-        print()
+    if 'clustering_coefficient' in feature_names:
+        clustering_coefficient = normalize_dict(nx.clustering(G))
+        feature_dict['clustering_coefficient'] = clustering_coefficient
 
-    # Compute the node hypervectors using basis hypervectors and node features
-    _node_hypervectors = {node: flip_components(basis[0], rank) for node, rank in page_rank.items()}
-    for node, value in node_degree.items():
-        _node_hypervectors[node] += flip_components(basis[1], value)
-    for node, value in closeness_centrality.items():
-        _node_hypervectors[node] += flip_components(basis[2], value)
-    for node, value in betweenness_centrality.items():
-        _node_hypervectors[node] += flip_components(basis[3], value)
-    for node, value in eigenvector_centrality.items():
-        _node_hypervectors[node] += flip_components(basis[4], value)
-    for node, value in clustering_coefficient.items():
-        _node_hypervectors[node] += flip_components(basis[5], value)
+        if verbose:
+            print("========================")
+            print("  Clusteing Coefficient ")
+            print("========================")
+            print("Node\Closeness")
+            for node, value in clustering_coefficient.items():
+                print(f"{node}\t{value:.4f}")
+            print()
+
+    # Init the node hypervectors dictionary
+    nodes = next(iter(feature_dict.values())).keys()
+    node_hypervectors = {node: np.ones_like(next(iter(basis.values()))) for node in nodes}
+
+    # Combine the feature hypervectors
+    for feat in feature_names:
+        for node, value in feature_dict[feat].items():
+            node_hypervectors[node] *= flip_components(basis[feat], value)
     
     # Re-binarize the hypervectors
-    node_hypervectors = {}
-    for node, hypervector in _node_hypervectors.items():
-        node_hypervectors[node] = binarize_hypervector(hypervector)
+    # node_hypervectors = {}
+    # for node, hypervector in _node_hypervectors.items():
+    #     node_hypervectors[node] = binarize_hypervector(hypervector)
 
     # Output hypervectors
     if verbose:
@@ -306,11 +381,116 @@ def encode_network_hypervectors(G, basis, verbose=False):
     return node_hypervectors
 
 
+def encode_weight_hypervectors(G, basis):
+    weight_hypervectors = {}
+
+    for edge in G.edges():
+
+        # Get the edge weight
+        source, dest = edge
+
+        # If is weighted add only the 'source, dest' edge
+        if nx.is_weighted(G, edge=edge):
+            weight = float(G[source][dest]["weight"])
+
+            if nx.is_directed(G):
+                weight_hypervectors[(source, dest)] = flip_components(basis["weight"], weight)
+            else:
+                weight_hypervectors[(source, dest)] = flip_components(basis["weight"], weight)
+                weight_hypervectors[(dest, source)] = flip_components(basis["weight"], weight)
+
+        # Otherwise, add alos 'dest, source'
+        else: 
+            if nx.is_directed(G):
+                weight_hypervectors[(source, dest)] = basis["weight"]
+            else:
+                weight_hypervectors[(source, dest)] = basis["weight"]
+                weight_hypervectors[(dest, source)] = basis["weight"]
+
+
+
+    return weight_hypervectors
+
+
+def encode_memory_hypervectors(G, node_hypervectors, weight_hypervectors, n_iters=100, refine=False):
+    memory_hypervectors = {}
+
+    # Generate memory hypervectors
+    for node in G.nodes():
+        memory_hypervectors[node] = node_hypervectors[node]
+
+        for neighbor in G.neighbors(node):
+            
+            # If directed, sum only the incomning edge
+            if nx.is_directed(G):   
+                if (neighbor, node) in G.edges:
+                    memory_hypervectors[node] += node_hypervectors[neighbor] * weight_hypervectors[neighbor, node]
+                else:
+                    # print(f"Not found edge ({neighbor}, {node})")
+                    continue
+            
+            # Otherwise, sum all edges
+            else:
+                if (node, neighbor) in G.edges or (neighbor, node) in G.edges:
+                    try:
+                        memory_hypervectors[node] += node_hypervectors[neighbor] * weight_hypervectors[node, neighbor]
+                    except:
+                        memory_hypervectors[node] += node_hypervectors[neighbor] * weight_hypervectors[neighbor, node]
+                else:
+                    print(f"Not found edge ({node}, {neighbor})")
+                    continue
+                    
+    # Refine memory
+    vector_size = next(iter(memory_hypervectors.values())).shape[0]
+    keep_refine = refine
+    for _ in tqdm(range(n_iters), ascii=True, desc="Refining memory:"):
+        
+        # Check early stopping flag
+        if keep_refine == False:
+            break
+
+        # At each iteration the algorithm try to stop the refinement setting 
+        # the flag to False, but if during the computation we finish in a 
+        # "refinement sceario", the flag will be setted again to True 
+        # and we must perform another loop.
+        keep_refine = False
+
+        for node_i in G.nodes:
+            # Compute the threshold
+            degree_i = G.degree[node_i]
+            threshold = similarity_threshold(degree_i, vector_size)
+
+            for node_j in G.nodes:
+                # Compute the decision score
+                decision_score = hypervector_similarity(memory_hypervectors[node_i], node_hypervectors[node_j])
+
+                # Refine memory
+                if node_i != node_j:
+                    if decision_score < threshold and ((node_i, node_j) in G.edges):
+                        # print(f"Refining memory of node {node_i}...")
+                        memory_hypervectors[node_i] += node_hypervectors[node_j]
+                        keep_refine = True
+                    elif decision_score >= threshold and ((node_i, node_j) not in G.edges):
+                        # print(f"Refining memory of node {node_i}...")
+                        memory_hypervectors[node_i] -= node_hypervectors[node_j]
+                        keep_refine = True
+                    else:
+                        continue
+
+    # Re-binarize memory hypervectors
+    for node, hypervector in memory_hypervectors.items():
+        memory_hypervectors[node] = binarize_hypervector(hypervector)
+
+    return memory_hypervectors
+
+
+
 if __name__ == "__main__":
 
-    # Create a basis hypervector for each node feature
+    # Create a basis hypervector for each node feature and weight
     node_features = ["page_rank", "node_degree", "closeness_centrality", "betweenness_centrality", "eigenvector_centrality", "clustering_coefficient"]
-    basis = generate_hypervector_basis(len(node_features), 10000)
+    basis = generate_hypervector_basis(node_features, 10000)
+    weight_basis = generate_hypervector_basis(["weight"], 10000)
 
     # Create a directed graph
     G = nx.DiGraph()
@@ -326,12 +506,14 @@ if __name__ == "__main__":
     G.add_edge('F', 'C')
     G.add_edge('F', 'D')
 
-    node_hypervectors = encode_network_hypervectors(G, basis)
+    H = encode_node_hypervectors(G, basis, verbose=True)
+    W = encode_weight_hypervectors(G, weight_basis)
+    M = encode_memory_hypervectors(G, H, W)
 
     # Check similarities
     print("Hypervector similarities:")
-    print(f"A - A:\t{hypervector_similarity(node_hypervectors['A'], node_hypervectors['A'])}")
-    print(f"A - B:\t{hypervector_similarity(node_hypervectors['A'], node_hypervectors['B'])}")
-    print(f"B - A:\t{hypervector_similarity(node_hypervectors['B'], node_hypervectors['A'])}")
-    print(f"A - F:\t{hypervector_similarity(node_hypervectors['A'], node_hypervectors['F'])}")
+    print(f"A - A:\t{hypervector_similarity(M['A'], M['A'])}")
+    print(f"A - B:\t{hypervector_similarity(M['A'], M['B'])}")
+    print(f"B - A:\t{hypervector_similarity(M['B'], M['A'])}")
+    print(f"A - F:\t{hypervector_similarity(M['A'], M['F'])}")
     print()

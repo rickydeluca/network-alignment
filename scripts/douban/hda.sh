@@ -9,4 +9,5 @@ python network_alignment.py \
 --target_dataset ${PD}/${PREFIX2}/graphsage/ \
 --groundtruth ${PD}/dictionaries/groundtruth \
 HDA \
---vector_size 10000 
+--vector_size 10000 \
+--node_features node_degree

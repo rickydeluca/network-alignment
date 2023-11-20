@@ -14,8 +14,10 @@ from evaluation.matcher import top_k, greedy_match
 import pdb
 def get_statistics(alignment_matrix, groundtruth_matrix):
     pred = greedy_match(alignment_matrix)
-    greedy_match_acc = compute_accuracy(pred, groundtruth_matrix)
+    greedy_match_acc, true_positive_rows = compute_accuracy(pred, groundtruth_matrix)
     print("Accuracy: %.4f" % greedy_match_acc)
+
+    return pred, true_positive_rows
 
     # # f1_score(pred, groundtruth_matrix, labels=[0, 1], pos_label=1, average='micro')
     # MAP, AUC, Hit = compute_MAP_AUC_Hit(alignment_matrix, groundtruth_matrix)
@@ -57,11 +59,16 @@ def compute_precision_k(top_k_matrix, gt):
 def compute_accuracy(greedy_matched, gt):
     # print(gt)
     n_matched = 0
+    true_positive_rows = []
     for i in range(greedy_matched.shape[0]):
         if greedy_matched[i].sum() > 0 and np.array_equal(greedy_matched[i], gt[i]):
-            n_matched += 1
+            n_matched += 1 
+
+            # Save the index of the matched row
+            true_positive_rows.append(i)
+
     n_nodes = (gt==1).sum()
-    return n_matched/n_nodes
+    return n_matched/n_nodes, true_positive_rows
 
 def compute_MAP_AUC_Hit(alignment_matrix, gt):
     S_argsort = alignment_matrix.argsort(axis=1)[:, ::-1]

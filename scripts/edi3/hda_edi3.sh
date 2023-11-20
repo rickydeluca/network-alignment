@@ -1,6 +1,6 @@
 PD=dataspace/edi3
 PREFIX=REGAL-d05-seed1
-TRAINRATIO=0.2
+TRAINRATIO=0.8
 
 python network_alignment.py \
 --source_dataset ${PD}/graphsage/ \

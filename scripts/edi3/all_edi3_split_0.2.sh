@@ -19,9 +19,9 @@ for ER in "${EDGE_REMOVAL[@]}"; do
             "FINAL"
             "IsoRank"
             "BigAlign"
-            "PALE --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict --cuda"
+            "PALE --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict --cuda --batch_size_mapping 11"
             "IONE --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict"
-            "DeepLink --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict --cuda"
+            "DeepLink --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict --cuda --batch_size_mapping 11"
             "HDA --vector_size 10000"
         )
 

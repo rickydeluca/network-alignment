@@ -5,6 +5,7 @@ from evaluation.metrics import get_statistics
 import utils.graph_utils as graph_utils
 import random
 import numpy as np
+import pandas as pd
 import torch
 import argparse
 import os
@@ -106,7 +107,7 @@ def parse_args():
 
     parser_HDA = subparsers.add_parser('HDA', help='HDA algorithm')
     parser_HDA.add_argument('--vector_size',              default=10000, type=int)
-
+    parser_HDA.add_argument('--node_features', nargs='+', default=["page_rank", "node_degree", "closeness_centrality", "betweenness_centrality", "eigenvector_centrality", "clustering_coefficient"])
 
     return parser.parse_args()
 
@@ -138,7 +139,7 @@ if __name__ == '__main__':
     elif algorithm == "DeepLink":
         model = DeepLink(source_dataset, target_dataset, args)
     elif algorithm == "HDA":
-        model = HDA(source_dataset, target_dataset, vector_size=args.vector_size)
+        model = HDA(source_dataset, target_dataset, vector_size=args.vector_size, node_features=args.node_features)
     else:
         raise Exception("Unsupported algorithm")
 
@@ -149,7 +150,65 @@ if __name__ == '__main__':
     start_time = time()
 
     S = model.align()
-    get_statistics(S, groundtruth_matrix)
+    pred, true_positive_sources = get_statistics(S, groundtruth_matrix)
+
+    # [MY CODE]
+    # Extract the true aligned node names:
+    # We already have the node index for the source (indices in 'true_positive_sources'),
+    # we need to get for each row the target node index, retrieve for both indices
+    # the node names and store the result in a tuple.
+    true_alignments = []
+    for i in true_positive_sources:
+
+        # Get the 'target' node index
+        true_row = np.array(pred[i])
+        true_target = np.where(true_row == 1)[0].item()
+
+        # Get the node names
+        source_name = list(source_dataset.G.nodes())[i]
+        target_name = list(target_dataset.G.nodes())[true_target]
+
+        true_alignments.append((source_name, target_name))
+
+    # print("\nTrue alignments:\n", true_alignments, end="\n\n")
+
+    # Get the degrees for each true alignment:
+    source_degrees = {}
+    target_degrees = {}
+
+    for s, t in true_alignments:
+        source_degrees[s] = source_dataset.G.degree(s)
+        target_degrees[t] = target_dataset.G.degree(t)
+
+    
+    source_degrees = dict(sorted(source_degrees.items(), key=lambda x:x[1], reverse=True))
+    target_degrees = dict(sorted(target_degrees.items(), key=lambda x:x[1], reverse=True))
+
+    with open(f"results/ppi_{args.algorithm}_source_degrees.txt", 'w') as f:  
+        for key, value in source_degrees.items():  
+            f.write('%s:%s\n' % (key, value))
+
+    with open(f"results/ppi_{args.algorithm}_target_degrees.txt", 'w') as f:  
+        for key, value in target_degrees.items():  
+            f.write('%s:%s\n' % (key, value))
+
+
+    # Get all degrees
+    all_source_degrees = {n: source_dataset.G.degree(n) for n in source_dataset.G.nodes}
+    all_target_degrees = {n: target_dataset.G.degree(n) for n in target_dataset.G.nodes}
+
+    all_source_degrees = dict(sorted(all_source_degrees.items(), key=lambda x:x[1], reverse=True))
+    all_target_degrees = dict(sorted(all_target_degrees.items(), key=lambda x:x[1], reverse=True))
+
+    with open(f"results/ppi_{args.algorithm}_all_source_degrees.csv", 'w') as f:  
+        for key, value in all_source_degrees.items():  
+            f.write('%s:%s\n' % (key, value))
+
+    with open(f"results/ppi_{args.algorithm}_all_target_degrees.csv", 'w') as f:  
+        for key, value in all_target_degrees.items():  
+            f.write('%s:%s\n' % (key, value))
+
+
     print("Full_time: ", time() - start_time)
 
 
