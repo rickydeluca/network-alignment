@@ -1,0 +1,6 @@
+Algorithm,Edge_Removal_Ratio,Train_Ratio,Mean accuracy
+,0.01,0.8,
+,0.0,0.8,
+,0.1,0.8,
+,0.05,0.8,
+,0.2,0.8,

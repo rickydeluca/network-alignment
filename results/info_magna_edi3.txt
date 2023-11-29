@@ -1,0 +1,6 @@
+Population size: 3000
+Num generations: 1000
+Num threads: 8
+Measure: S3
+Alpha: 0
+Init file: None

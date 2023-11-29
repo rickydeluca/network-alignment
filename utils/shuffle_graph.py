@@ -1,13 +1,16 @@
-import sys
 import argparse
-import numpy as np
+import json
 import os
 import pdb
 import subprocess
-import json
-from edgelist_to_graphsage import edgelist_to_graphsage
-from networkx.readwrite import json_graph
+import sys
 from pathlib import Path
+
+import numpy as np
+from edgelist_to_graphsage import edgelist_to_graphsage
+from networkx.readwrite import node_link_graph  # MOD
+from networkx.readwrite import json_graph
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Shuffle a graph and generate new file")
@@ -43,6 +46,27 @@ def load_edgelist_file(nodes_file, weighted=False):
 
     all_nodes = np.array(all_nodes)
     return all_nodes, all_edges
+
+# MOD
+def load_json_file(path, weighted=False):
+    G_data = json.load(open(path))
+    G = node_link_graph(G_data)
+
+    # Get all nodes
+    all_nodes = np.array(G.nodes)
+
+    # Get all edges with weight (if present)
+    all_edges = []
+    for u, v in G.edges:
+        if weighted:
+            all_edges.append((u, v, G.get_edge_data(u, v)))
+        else:
+           all_edges.append((u, v))
+    all_edges = np.array(all_edges)
+
+
+    return all_nodes, all_edges
+
 
 def shuffle(all_nodes, all_edges, weighted=False):
     new_idxes = np.arange(0, len(all_nodes))
@@ -126,7 +150,13 @@ def save(permute_edges, node_dict, node_rev_dict, input_dir, out_dir, weighted=F
 if __name__ == '__main__':
     args = parse_args()
     np.random.seed(args.seed)
+
+    # MOD: Load graph using the node-link data format since it contains also the disconnected nodes.
+    # graph_path = args.input_dir + "/graphsage/G.json" 
+    # all_nodes, all_edges = load_json_file(graph_path, weighted=args.weighted)
+
+    # OLD:
     all_nodes, all_edges = load_edgelist_file(args.input_dir + "/edgelist/edgelist", weighted=args.weighted)
+    
     permute_edges, node_dict, node_rev_dict = shuffle(all_nodes, all_edges, weighted=args.weighted)
     save(permute_edges, node_dict, node_rev_dict, args.input_dir, args.out_dir, weighted=args.weighted)
-

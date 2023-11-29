@@ -1,0 +1,6 @@
+algorithm,edge_removal_ratio,train_ratio,mean_accuracy,mean_execution_time
+MAGNA,0.0,0.8,0,4.9562
+MAGNA,0.2,0.8,0,4.6792
+MAGNA,0.05,0.8,0,5.1483
+MAGNA,0.1,0.8,0,4.5322
+MAGNA,0.01,0.8,.0027,5.3934

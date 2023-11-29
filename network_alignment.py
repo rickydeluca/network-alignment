@@ -1,15 +1,17 @@
-from input.dataset import Dataset
-from time import time
-from algorithms import *
-from evaluation.metrics import get_statistics
-import utils.graph_utils as graph_utils
+import argparse
+import csv
+import os
+import pdb
 import random
+from time import time
+
 import numpy as np
 import pandas as pd
 import torch
-import argparse
-import os
-import pdb
+import utils.graph_utils as graph_utils
+from algorithms import *
+from evaluation.metrics import get_statistics
+from input.dataset import Dataset
 
 
 def parse_args():
@@ -18,9 +20,10 @@ def parse_args():
     parser.add_argument('--target_dataset', default="dataspace/douban/offline/graphsage/")
     parser.add_argument('--groundtruth',    default="dataspace/douban/dictionaries/groundtruth")
     parser.add_argument('--alignment_matrix_name', default=None, help="Prefered name of alignment matrix.")
+    parser.add_argument('--transpose_alignment_matrix', action="store_true", default=False, help="Transpose the alignment matrix.")
     parser.add_argument('--seed',           default=123,    type=int)
 
-    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA')
+    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA, MAGNA, GraphSAGE')
 
     parser_IsoRank = subparsers.add_parser('IsoRank', help='IsoRank algorithm')
     parser_IsoRank.add_argument('--H',                   default=None, help="Priority matrix")
@@ -104,10 +107,19 @@ def parse_args():
     parser_DeepLink.add_argument('--alpha',               default=0.8, type=float)
     parser_DeepLink.add_argument('--num_cores',           default=8, type=int)
 
-
     parser_HDA = subparsers.add_parser('HDA', help='HDA algorithm')
     parser_HDA.add_argument('--vector_size',              default=10000, type=int)
     parser_HDA.add_argument('--node_features', nargs='+', default=["page_rank", "node_degree", "closeness_centrality", "betweenness_centrality", "eigenvector_centrality", "clustering_coefficient"])
+
+    parser_MAGNA = subparsers.add_parser('MAGNA', help='MAGNA++ algorithm')
+    parser_MAGNA.add_argument('--source_edgelist', default=None, type=str)
+    parser_MAGNA.add_argument('--target_edgelist', default=None, type=str)
+    parser_MAGNA.add_argument('--measure', default="S3", type=str)
+    parser_MAGNA.add_argument('--population_size', default=15000, type=int)
+    parser_MAGNA.add_argument('--num_generations', default=2000, type=int)
+    parser_MAGNA.add_argument('--num_threads', default=8, type=int)
+    parser_MAGNA.add_argument('--outfile', default="algorithms/MAGNA/output/magna", type=str)
+    parser_MAGNA.add_argument('--reverse', action="store_true", default=False)
 
     return parser.parse_args()
 
@@ -140,6 +152,10 @@ if __name__ == '__main__':
         model = DeepLink(source_dataset, target_dataset, args)
     elif algorithm == "HDA":
         model = HDA(source_dataset, target_dataset, vector_size=args.vector_size, node_features=args.node_features)
+    elif algorithm == "MAGNA":
+        model = MAGNA(source_dataset, target_dataset, source_edgelist=args.source_edgelist, target_edgelist=args.target_edgelist, measure=args.measure, population_size=args.population_size, num_generations=args.num_generations, num_threads=args.num_threads, outfile=args.outfile, reverse=args.reverse)
+    elif algorithm == "GraphSAGE":
+        model = GraphSAGE()
     else:
         raise Exception("Unsupported algorithm")
 
@@ -150,66 +166,30 @@ if __name__ == '__main__':
     start_time = time()
 
     S = model.align()
-    pred, true_positive_sources = get_statistics(S, groundtruth_matrix)
+    get_statistics(S, groundtruth_matrix)
 
-    # [MY CODE]
-    # Extract the true aligned node names:
-    # We already have the node index for the source (indices in 'true_positive_sources'),
-    # we need to get for each row the target node index, retrieve for both indices
-    # the node names and store the result in a tuple.
-    true_alignments = []
-    for i in true_positive_sources:
+    print(f"Full_time: {time() - start_time}")
 
-        # Get the 'target' node index
-        true_row = np.array(pred[i])
-        true_target = np.where(true_row == 1)[0].item()
+    # [MOD] Save the alignment matrix
+    # S = np.array(S)
+    # transpose = args.transpose_alignment_matrix
 
-        # Get the node names
-        source_name = list(source_dataset.G.nodes())[i]
-        target_name = list(target_dataset.G.nodes())[true_target]
+    # if transpose:
+    #     S = S.T
 
-        true_alignments.append((source_name, target_name))
+    # print("Alignment matrix shape:", S.shape)
+    # source_idx2id = {idx: id for id, idx in source_dataset.id2idx.items()}
+    # target_idx2id = {idx: id for id, idx in target_dataset.id2idx.items()}
 
-    # print("\nTrue alignments:\n", true_alignments, end="\n\n")
-
-    # Get the degrees for each true alignment:
-    source_degrees = {}
-    target_degrees = {}
-
-    for s, t in true_alignments:
-        source_degrees[s] = source_dataset.G.degree(s)
-        target_degrees[t] = target_dataset.G.degree(t)
-
-    
-    source_degrees = dict(sorted(source_degrees.items(), key=lambda x:x[1], reverse=True))
-    target_degrees = dict(sorted(target_degrees.items(), key=lambda x:x[1], reverse=True))
-
-    with open(f"results/ppi_{args.algorithm}_source_degrees.txt", 'w') as f:  
-        for key, value in source_degrees.items():  
-            f.write('%s:%s\n' % (key, value))
-
-    with open(f"results/ppi_{args.algorithm}_target_degrees.txt", 'w') as f:  
-        for key, value in target_degrees.items():  
-            f.write('%s:%s\n' % (key, value))
-
-
-    # Get all degrees
-    all_source_degrees = {n: source_dataset.G.degree(n) for n in source_dataset.G.nodes}
-    all_target_degrees = {n: target_dataset.G.degree(n) for n in target_dataset.G.nodes}
-
-    all_source_degrees = dict(sorted(all_source_degrees.items(), key=lambda x:x[1], reverse=True))
-    all_target_degrees = dict(sorted(all_target_degrees.items(), key=lambda x:x[1], reverse=True))
-
-    with open(f"results/ppi_{args.algorithm}_all_source_degrees.csv", 'w') as f:  
-        for key, value in all_source_degrees.items():  
-            f.write('%s:%s\n' % (key, value))
-
-    with open(f"results/ppi_{args.algorithm}_all_target_degrees.csv", 'w') as f:  
-        for key, value in all_target_degrees.items():  
-            f.write('%s:%s\n' % (key, value))
-
-
-    print("Full_time: ", time() - start_time)
+    # with open(f'alignments/{args.alignment_matrix_name}', 'w', newline='\n') as csvfile:
+    #     writer = csv.writer(csvfile, delimiter=',')
+        
+    #     for i in range(S.shape[0]):
+    #         for j in range(S.shape[1]):
+    #             if transpose:
+    #                 writer.writerow([target_idx2id[i], source_idx2id[j], S[i, j]])
+    #             else:
+    #                 writer.writerow([source_idx2id[i], target_idx2id[j], S[i, j]])
 
 
 
