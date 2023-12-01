@@ -1,5 +1,0 @@
-algorithm,edge_removal_ratio,train_ratio,mean_accuracy
-IsoRank,0.0,0.8,1.0000
-IsoRank,0.1,0.8,.1241
-IsoRank,0.05,0.8,.0931
-IsoRank,0.01,0.8,.3206

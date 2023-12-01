@@ -1,11 +1,13 @@
 from input.semi_synthetic import SemiSynthetic
 import argparse
+import random
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Erdos Renyi Graph Generation")
     parser.add_argument('--input_path', default="data/ppi")
     parser.add_argument('--d', default=0.05, type=float)
+    parser.add_argument('--seed', default=1, type=int)
     parser.add_argument('--weighted', action="store_true", help="Weighted edgelist")
     return parser.parse_args()
 
@@ -22,6 +24,6 @@ def gen_REGAL(d, input_path, p_change_feats=None, seed=1, weighted=False):
 
 if __name__ == "__main__":
     args = parse_args()
-    gen_REGAL(args.d, args.input_path, weighted=args.weighted)
+    gen_REGAL(args.d, args.input_path, seed=args.seed, weighted=args.weighted)
     print("Done!")
 

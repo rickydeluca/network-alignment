@@ -386,7 +386,7 @@ def draw_number_of_content_neighbors(legend):
 # feat_models = ["RAN", "REGAL", "FINAL", "BigAlign"]
 # models = feat_models
 models_extra = ["REGAL","FINAL","IsoRank","BigAlign","PALE","IONE","DeepLink","FAN"]
-models = ["REGAL","FINAL","IsoRank","BigAlign","PALE","IONE","DeepLink","HDA","MAGNA","GraphSAGE"]
+models = ["REGAL","FINAL","IsoRank","BigAlign","PALE","IONE","DeepLink","HDA","MAGNA","SANE"]
 
 # legend = False
 # draw_numwalks(legend)

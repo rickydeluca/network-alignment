@@ -16,8 +16,9 @@
 PD=dataspace/$1     # Inupt networks
 TR=$2               # Train-test split ratio    
 ER=$3               # Edge removal ratio
+SEED=$4
 
-PREFIX=REGAL-d${ER}-seed1
+PREFIX=REGAL-d${ER}-seed${SEED}
 
 # Step 1: Generate target graph.
 
@@ -25,24 +26,26 @@ if [ "$1" == "edi3" ]; then
     python -m generate_dataset.semi_synthetic \
     --input_path ${PD} \
     --d 0.${ER} \
+    --seed $SEED \
     --weighted
 else
     python -m generate_dataset.semi_synthetic \
     --input_path ${PD} \
-    --d 0.${ER}
+    --d 0.${ER} \
+    --seed $SEED
 fi
 
 # Step 2: Shuffle ID and index of nodes in target graph.
 DIR="${PD}/${PREFIX}"
 
 if [ "$1" == "edi3" ]; then
-    python utils/shuffle_graph.py --input_dir ${DIR} --out_dir ${DIR}--1 --weighted
+    python utils/shuffle_graph.py --input_dir ${DIR} --out_dir ${DIR}--${SEED} --weighted
 else
-    python utils/shuffle_graph.py --input_dir ${DIR} --out_dir ${DIR}--1
+    python utils/shuffle_graph.py --input_dir ${DIR} --out_dir ${DIR}--${SEED}
 fi
 
 rm -r ${DIR} 
-mv ${DIR}--1 ${DIR}
+mv ${DIR}--${SEED} ${DIR}
 
 # Step 3: Split full dictionary into train and test files.
 python utils/split_dict.py \

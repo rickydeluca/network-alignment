@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument('--transpose_alignment_matrix', action="store_true", default=False, help="Transpose the alignment matrix.")
     parser.add_argument('--seed',           default=123,    type=int)
 
-    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA, MAGNA, GraphSAGE')
+    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA, MAGNA, SANE')
 
     parser_IsoRank = subparsers.add_parser('IsoRank', help='IsoRank algorithm')
     parser_IsoRank.add_argument('--H',                   default=None, help="Priority matrix")
@@ -154,8 +154,8 @@ if __name__ == '__main__':
         model = HDA(source_dataset, target_dataset, vector_size=args.vector_size, node_features=args.node_features)
     elif algorithm == "MAGNA":
         model = MAGNA(source_dataset, target_dataset, source_edgelist=args.source_edgelist, target_edgelist=args.target_edgelist, measure=args.measure, population_size=args.population_size, num_generations=args.num_generations, num_threads=args.num_threads, outfile=args.outfile, reverse=args.reverse)
-    elif algorithm == "GraphSAGE":
-        model = GraphSAGE()
+    elif algorithm == "SANE":
+        model = SANE()
     else:
         raise Exception("Unsupported algorithm")
 

@@ -7,7 +7,7 @@ from algorithms.REGAL import REGAL
 from algorithms.PALE import PALE
 from algorithms.HDA import HDA
 from algorithms.MAGNA import MAGNA
-from algorithms.GraphSAGE import GraphSAGE
+from algorithms.SANE import SANE
 
-__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE', 'HDA', 'MAGNA', 'GraphSAGE']
+__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE', 'HDA', 'MAGNA', 'SANE']
 
