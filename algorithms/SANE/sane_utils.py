@@ -12,8 +12,9 @@ def networkx_to_pyg(dataset):
     G = dataset.G
     id2idx = dataset.id2idx
     idx2id = {idx: id for id, idx in id2idx.items()}
-    node_feats = dataset.features.astype(np.float32)
-    edge_feats = dataset.edge_features
+    node_feats = torch.tensor(dataset.features, dtype=torch.float32)
+    if dataset.edge_features:
+        edge_feats = torch.tensor(dataset.edge_features)
     
     # # Add node features to the network...
     # if node_feats is not None:
@@ -29,7 +30,9 @@ def networkx_to_pyg(dataset):
     # Generate PyG representation
     data = from_networkx(G)
     data.x = node_feats
-    data.edge_attr = edge_feats
+
+    if dataset.edge_features:
+        data.edge_attr = edge_feats
 
     return data, idx2id
 
@@ -39,7 +42,7 @@ def get_prediction_model(model, input_dim=0):
         predictor = CosineSimilarity()
     elif model == 'inner_product':
         predictor = InnerProduct()
-    elif model == 'DNN':
+    elif model == 'dnn':
         predictor = LinkPredictor(input_dim=input_dim)
     else:
         raise ValueError(f"{model} is an invalid model!")

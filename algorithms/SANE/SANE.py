@@ -13,8 +13,7 @@ from torch_geometric.nn import GraphSAGE
 from torch_geometric.transforms import RandomLinkSplit
 
 from algorithms.network_alignment_model import NetworkAlignmentModel
-from algorithms.SANE.prediction_models import get_prediction_model
-from algorithms.SANE.sane_utils import networkx_to_pyg
+from algorithms.SANE.sane_utils import get_prediction_model, networkx_to_pyg
 from input.dataset import Dataset
 
 
@@ -32,9 +31,17 @@ class SANE(NetworkAlignmentModel):
 
     
     def align(self):
-        embedder_source = self.train_unsup(network='source')
-        embedder_target = self.train_unsup(network='target')
-        return 0
+        # Get embeddings for source and target networks.
+        h_src = self.train_unsup(network='source')
+        h_tgt = self.train_unsup(network='target')
+
+        # Compute the embedding cosine similarity.
+        h_src_normalized = F.normalize(h_src, p=2, dim=1)
+        h_dst_normalized = F.normalize(h_tgt, p=2, dim=1)
+
+        self.aligment_matrix = torch.mm(h_src_normalized, h_dst_normalized.t()).cpu()
+        
+        return self.aligment_matrix
 
     
     def get_alignment_matrix(self):
@@ -53,8 +60,8 @@ class SANE(NetworkAlignmentModel):
 
         # Split both networks in train, val and test
         transform = RandomLinkSplit(
-            num_val=0.1,
-            num_test=0.1,
+            num_val=0.2,
+            num_test=0.0,
             disjoint_train_ratio=0.3,
             add_negative_train_samples=False,   # We will add them in the SAGE model
             is_undirected=True,
@@ -208,14 +215,22 @@ class SANE(NetworkAlignmentModel):
         # Load best state dicts
         embedder.load_state_dict(best_model_state_dict['embedder'])
         predictor.load_state_dict(best_model_state_dict['predictor'])
-        return embedder, predictor
+
+        # Get the node embeddings for the input network
+        # using the best embedding model.
+        embedder.eval()
+        data = data.to(device)
+        with torch.no_grad():
+            final_h = embedder(data.x, data.edge_index)
+
+        return final_h
     
 
 def parse_args():
     parser = argparse.ArgumentParser(description="SANE")
-    parser.add_argument('--prefix1', default="dataspace/douban/online/graphsage")
-    parser.add_argument('--prefix2', default="dataspace/douban/offline/graphsage")
-    parser.add_argument('--prediction', default="cosine_similarity")
+    parser.add_argument('--prefix1', default="dataspace/ppi/graphsage")
+    parser.add_argument('--prefix2', default="dataspace/ppi/REGAL-d2-seed1/graphsage")
+    parser.add_argument('--prediction', default="dnn")
     parser.add_argument('--hidden_size', type=int, default=64)
     parser.add_argument('--output_size', type=int, default=64)
     parser.add_argument('--num_layers', type=int, default=2)

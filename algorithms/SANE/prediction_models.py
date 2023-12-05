@@ -69,9 +69,6 @@ class CosineSimilarity(nn.Module):
     def __init__(self):
         super(CosineSimilarity, self).__init__()
         self.cosine_similarity = nn.CosineSimilarity(dim=1, eps=1e-8)
-
-    # def parameters(self):
-    #     return []
     
     def pred(self, x_i, x_j):
         return self.cosine_similarity(x_i, x_j)
@@ -85,9 +82,6 @@ class InnerProduct(nn.Module):
     """
     def __init__(self):
         super(InnerProduct, self).__init__()
-    
-    # def parameters(self):
-    #     return []
         
     def pred(self, x_i, x_j):
         return (x_i * x_j).sum(dim=-1)

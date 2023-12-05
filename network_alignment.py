@@ -120,6 +120,15 @@ def parse_args():
     parser_MAGNA.add_argument('--num_threads', default=8, type=int)
     parser_MAGNA.add_argument('--outfile', default="algorithms/MAGNA/output/magna", type=str)
     parser_MAGNA.add_argument('--reverse', action="store_true", default=False)
+    
+    parser_SANE = subparsers.add_parser('SANE', help='SANE algorithm')
+    parser_SANE.add_argument('--prediction', default="dnn")
+    parser_SANE.add_argument('--hidden_size', type=int, default=64)
+    parser_SANE.add_argument('--output_size', type=int, default=64)
+    parser_SANE.add_argument('--num_layers', type=int, default=1)
+    parser_SANE.add_argument('--epochs', type=int, default=100)
+    parser_SANE.add_argument('--lr', type=float, default=0.0003)
+    parser_SANE.add_argument('--batch_size', type=int, default=256)
 
     return parser.parse_args()
 
@@ -155,7 +164,7 @@ if __name__ == '__main__':
     elif algorithm == "MAGNA":
         model = MAGNA(source_dataset, target_dataset, source_edgelist=args.source_edgelist, target_edgelist=args.target_edgelist, measure=args.measure, population_size=args.population_size, num_generations=args.num_generations, num_threads=args.num_threads, outfile=args.outfile, reverse=args.reverse)
     elif algorithm == "SANE":
-        model = SANE()
+        model = SANE(source_dataset=source_dataset, target_dataset=target_dataset, prediction=args.prediction, hidden_size=args.hidden_size, num_layers=args.num_layers, output_size=args.output_size, epochs=args.epochs, lr=args.lr, batch_size=args.batch_size)
     else:
         raise Exception("Unsupported algorithm")
 
@@ -169,33 +178,3 @@ if __name__ == '__main__':
     get_statistics(S, groundtruth_matrix)
 
     print(f"Full_time: {time() - start_time}")
-
-    # [MOD] Save the alignment matrix
-    # S = np.array(S)
-    # transpose = args.transpose_alignment_matrix
-
-    # if transpose:
-    #     S = S.T
-
-    # print("Alignment matrix shape:", S.shape)
-    # source_idx2id = {idx: id for id, idx in source_dataset.id2idx.items()}
-    # target_idx2id = {idx: id for id, idx in target_dataset.id2idx.items()}
-
-    # with open(f'alignments/{args.alignment_matrix_name}', 'w', newline='\n') as csvfile:
-    #     writer = csv.writer(csvfile, delimiter=',')
-        
-    #     for i in range(S.shape[0]):
-    #         for j in range(S.shape[1]):
-    #             if transpose:
-    #                 writer.writerow([target_idx2id[i], source_idx2id[j], S[i, j]])
-    #             else:
-    #                 writer.writerow([source_idx2id[i], target_idx2id[j], S[i, j]])
-
-
-
-
-
-
-
-
-

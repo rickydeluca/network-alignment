@@ -73,6 +73,15 @@ for ALG_NAME in "${ALGORITHMS[@]}"; do
                 NUM_GENERATIONS=1000
                 NUM_THREADS=8
                 ALG_ARGS="--source_edgelist ${DATA_SPACE}/edgelist/edgelist --target_edgelist ${DATA_SPACE}/${PREFIX}/edgelist/edgelist --measure $MEASURE --population_size $POPULATION_SIZE --num_generations $NUM_GENERATIONS --num_threads $NUM_THREADS --outfile algorithms/MAGNA/output/magna --reverse"
+            elif [ "$ALG_NAME" == "SANE" ]; then
+                PREDICTION="dnn"
+                HIDDEN_SIZE=64
+                NUM_LAYERS=2
+                OUTPUT_SIZE=64
+                EPOCHS=64
+                LR=0.0003
+                BATCH_SIZE=256
+                ALG_ARGS="--prediction $PREDICTION --hidden_size $HIDDEN_SIZE --num_layers $NUM_LAYERS --output_size $OUTPUT_SIZE --epochs $EPOCHS --lr $LR --batch_size $BATCH_SIZE"
             else
                 echo "$ALG_NAME is not a valid algorithm."
             fi
