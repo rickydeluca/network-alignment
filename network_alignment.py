@@ -122,13 +122,21 @@ def parse_args():
     parser_MAGNA.add_argument('--reverse', action="store_true", default=False)
     
     parser_SANE = subparsers.add_parser('SANE', help='SANE algorithm')
-    parser_SANE.add_argument('--prediction', default="dnn")
-    parser_SANE.add_argument('--hidden_size', type=int, default=64)
-    parser_SANE.add_argument('--output_size', type=int, default=64)
-    parser_SANE.add_argument('--num_layers', type=int, default=1)
+    parser_SANE.add_argument('--train_dict', type=str, default="dataspace/douban/dictionaries/node,split=0.2.train.dict", help="Path to the alignment dictionary for training.")
+    parser_SANE.add_argument('--embedding_model', type=str, default="sage", help="Model for prediction (default: 'sage').")
+    parser_SANE.add_argument('--mapping_model', type=str, default="dnn", help="Model for alignment mapping (default: 'dnn').")
+    parser_SANE.add_argument('--device', type=str, default="cpu", help="Device to use for training (default: cpu)")
+    
+    parser_SANE.add_argument('--embedding_dim', type=int, default=1024, help="Size for the learned embeddings (default: 1024).")
+    parser_SANE.add_argument('--num_layers', type=int, default=1, help="Num layers for the embedding model (default: 1).")
+    parser_SANE.add_argument('--hidden_sizes', nargs='+', default=[], help="List with the sizez for the embeddin model hidden channels (default: []).")
+    
     parser_SANE.add_argument('--epochs', type=int, default=100)
     parser_SANE.add_argument('--lr', type=float, default=0.0003)
-    parser_SANE.add_argument('--batch_size', type=int, default=256)
+    parser_SANE.add_argument('--batch_size', type=int, default=256, help="Batch size (default: 256).")
+    parser_SANE.add_argument('--embedding_dropout', type=float, default=0.2, help="Dropout probability for embedding model (default: 0.2).")
+    parser_SANE.add_argument('--mapping_dropout', type=float, default=0.5, help="Dropout probability for mapping model (default: 0.5).")
+    
 
     return parser.parse_args()
 
@@ -164,13 +172,13 @@ if __name__ == '__main__':
     elif algorithm == "MAGNA":
         model = MAGNA(source_dataset, target_dataset, source_edgelist=args.source_edgelist, target_edgelist=args.target_edgelist, measure=args.measure, population_size=args.population_size, num_generations=args.num_generations, num_threads=args.num_threads, outfile=args.outfile, reverse=args.reverse)
     elif algorithm == "SANE":
-        model = SANE(source_dataset=source_dataset, target_dataset=target_dataset, prediction=args.prediction, hidden_size=args.hidden_size, num_layers=args.num_layers, output_size=args.output_size, epochs=args.epochs, lr=args.lr, batch_size=args.batch_size)
+        model = SANE(source_dataset, target_dataset, args)
     else:
         raise Exception("Unsupported algorithm")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
-    torch.manual_seed(7)
+    torch.manual_seed(args.seed)
 
     start_time = time()
 

@@ -1,10 +1,14 @@
-import argparse
-import numpy as np
-import utils.graph_utils as graph_utils
+"""[MOD] This script was modified to choose if we want to generate the features
+for both source and target dataset or only one of them."""
 
+
+import argparse
+
+import numpy as np
+
+import utils.graph_utils as graph_utils
 from input.dataset import Dataset
 from utils.graph_utils import load_gt
-
 
 
 def parse_args():
@@ -13,21 +17,29 @@ def parse_args():
     parser.add_argument('--input_data2', default="")
     parser.add_argument('--feature_dim', default=128, type=int)
     parser.add_argument('--ground_truth', default="")
+    parser.add_argument('--only_target', action='store_true', default=False,
+                        help="If TRUE the sript generate the features \
+                            only for target dataset starting from the already \
+                            existing source features. (default: False).")
     return parser.parse_args()
 
 
 
 
-def create_features(data1, data2, dim, ground_truth):
-    feature1 = create_feature(data1, dim)
+def create_features(data1, data2, dim, ground_truth, only_target=False):
+    if only_target: # Load already existing features.
+        if data1.features is not None:
+            feature1 = data1.features
+        else:
+            raise ValueError("You choosed to generate only target features but the source dataset has not features.")
+    else:           # Create features also for source dataset.
+        feature1 = create_feature(data1, dim)
+
     feature2 = create_feature(data2, dim)
-    # source_nodes = np.array(list(ground_truth.keys()))
-    # target_nodes = np.array(list(ground_truth.values()))
-    # print(ground_truth)
+
     inverted_groundtruth = {v:k for k, v in ground_truth.items()}
     for i in range(len(feature2)):
         feature2[i] = feature1[inverted_groundtruth[i]]
-    # for i in range(len(feature1)):
 
     return feature1, feature2
 
@@ -59,6 +71,7 @@ if __name__ == "__main__":
     data1 = Dataset(args.input_data1)
     data2 = Dataset(args.input_data2)
     ground_truth = load_gt(args.ground_truth, data1.id2idx, data2.id2idx, 'dict', True)
-    feature1, feature2 = create_features(data1, data2, args.feature_dim, ground_truth)
-    np.save(args.input_data1 + '/feats.npy', feature1)
+    feature1, feature2 = create_features(data1, data2, args.feature_dim, ground_truth, only_target=args.only_target)
+    if not args.only_target:    # Save the source features only if we generated new features during the execution of this script.
+        np.save(args.input_data1 + '/feats.npy', feature1)
     np.save(args.input_data2 + '/feats.npy', feature2)

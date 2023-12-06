@@ -364,9 +364,9 @@ def encode_node_hypervectors(G, basis=None, verbose=False):
             node_hypervectors[node] *= flip_components(basis[feat], value)
     
     # Re-binarize the hypervectors
-    # node_hypervectors = {}
-    # for node, hypervector in _node_hypervectors.items():
-    #     node_hypervectors[node] = binarize_hypervector(hypervector)
+    bin_node_hypervectors = {}
+    for node, hypervector in node_hypervectors.items():
+        bin_node_hypervectors[node] = binarize_hypervector(hypervector)
 
     # Output hypervectors
     if verbose:
@@ -374,11 +374,11 @@ def encode_node_hypervectors(G, basis=None, verbose=False):
         print("  Node Hypervectors  ")
         print("=====================")
         print("Node\tHypervectors")
-        for node, hypervector in node_hypervectors.items():
+        for node, hypervector in bin_node_hypervectors.items():
             print(f"{node}\t{hypervector}")
         print()
 
-    return node_hypervectors
+    return bin_node_hypervectors
 
 
 def encode_weight_hypervectors(G, basis):
