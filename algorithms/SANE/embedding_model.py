@@ -25,16 +25,18 @@ class SpectralGCN(nn.Module):
     def forward(self, source_data, target_data):
         edge_index1 = source_data.edge_index
         edge_index2 = target_data.edge_index
+        edge_weight1 = source_data.weight
+        edge_weight2 = target_data.weight
         x1 = source_data.x
         x2 = target_data.x
-        
+
         for conv in self.convs:
             # Source network.
-            x1 = conv(x1, edge_index1)
+            x1 = conv(x1, edge_index1, edge_weight1)
             x1 = F.relu(x1)
 
             # Target network.
-            x2 = conv(x2, edge_index2)
+            x2 = conv(x2, edge_index2, edge_weight2)
             x2 = F.relu(x2)
 
         return x1, x2

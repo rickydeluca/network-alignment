@@ -11,10 +11,11 @@ from torch_geometric.data import Batch
 from torch_geometric.datasets import PPI
 from torch_geometric.loader import DataLoader, LinkNeighborLoader
 from torch_geometric.transforms import RandomLinkSplit
+from torch_geometric.utils import negative_sampling
 
 from algorithms.network_alignment_model import NetworkAlignmentModel
-from algorithms.SANE.sane_utils import (get_embedding_model,
-                                        get_mapping_model, networkx_to_pyg)
+from algorithms.SANE.sane_utils import (get_embedding_model, get_mapping_model,
+                                        networkx_to_pyg)
 from input.dataset import Dataset
 from utils.graph_utils import load_gt
 
@@ -42,17 +43,6 @@ class SANE(NetworkAlignmentModel):
         self.hidden_sizes = args.hidden_sizes
         self.seed = args.seed
 
-        # Groundtruth.
-        self.full_gt = {}   # With both train and test alignments.
-        gt = load_gt(args.train_dict, source_dataset.id2idx, target_dataset.id2idx, 'dict') # Train.
-        self.full_gt.update(gt)
-        test_gt = load_gt(args.groundtruth, source_dataset.id2idx, target_dataset.id2idx, 'dict') # Test.
-        self.full_gt.update(test_gt)
-        self.full_gt = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in self.full_gt.items()}
-        
-        self.train_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k,v in gt.items()}
-        self.train_index = torch.tensor([list(self.train_dict.keys()), list(self.train_dict.values())])
-
         # Alignment parameters.
         self.S = None
         self.embedder = None
@@ -60,14 +50,42 @@ class SANE(NetworkAlignmentModel):
         self.optimizer = None
         self.criterion = None
 
-        # Device
+        # Device.
         if args.device == 'cuda':
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         elif args.device == 'cpu':
             self.device = torch.device('cpu')
         else:
             raise ValueError("Invalid device. Choose from: 'cpu' and 'cuda'.")
-        
+    
+        # Load train and test groundtruths.
+        train_gt = load_gt(args.train_dict, source_dataset.id2idx, target_dataset.id2idx, 'dict')
+        test_gt = load_gt(args.groundtruth, source_dataset.id2idx, target_dataset.id2idx, 'dict')
+
+        # Build the full groundtruth and substitute the node 
+        # names with the node indices.
+        self.full_gt = {}
+        self.full_gt.update(train_gt)
+        self.full_gt.update(test_gt)
+        self.full_gt = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in self.full_gt.items()}
+
+        # Use a subset of the training dictionary to obtain a validation 
+        # dictionary, finally convert train, val and test dictionaries
+        # into edgelist tensors of shape (2, N), where N is the numeber of nodes.
+        self.train_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in train_gt.items()}
+        self.test_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in test_gt.items()}
+
+        train_and_val_index = torch.tensor([list(self.train_dict.keys()), list(self.train_dict.values())]).to(self.device)
+        split_idx = int(train_and_val_index.shape[1] * 0.8) # 20% of training as validation.
+        self.train_index = train_and_val_index[:, :split_idx]
+        self.val_index = train_and_val_index[:, split_idx:]
+        self.test_index = torch.tensor([list(self.test_dict.keys()), list(self.test_dict.values())]).to(self.device)
+
+        # [DEBUG]
+        # print("train_index_shape: ", self.train_index.shape)
+        # print("val_index_shape: ", self.val_index.shape)
+        # print("test_index_shape: ", self.test_index.shape)
+
 
     def get_alignment_matrix(self):
         if self.S is None:
@@ -78,20 +96,16 @@ class SANE(NetworkAlignmentModel):
     def align(self):
         """Performs alignment from source to target dataset."""
 
+        # Init training models.
         self.init_models()
         self.optimizer = torch.optim.Adam(list(self.embedder.parameters()) + list(self.mapper.parameters()), lr=self.lr)
         self.criterion = torch.nn.BCEWithLogitsLoss()
 
-        # Convert networks in a format suitable for PyG.
-        source_data = networkx_to_pyg(self.source_dataset).to(self.device)
-        target_data = networkx_to_pyg(self.target_dataset).to(self.device)
-        
-        # [DEBUG]
-        print(f"source data edge_index: {source_data.edge_index.shape}")
-        print(f"target data edge index: {target_data.edge_index.shape}")
+        # Preprocess data to create train, test and validation subnetworks.
+        self.preprocess_data()
 
         # Train models.
-        self.learn_embeddings(source_data, target_data)
+        self.learn_embeddings(patience=10)
 
         return self.S
     
@@ -123,7 +137,56 @@ class SANE(NetworkAlignmentModel):
         ).to(self.device)
 
 
-    def learn_embeddings(self, source_data, target_data, patience=None):
+    def preprocess_data(self):
+        # Convert networks in a format suitable for PyG.
+        source_data = networkx_to_pyg(self.source_dataset).to(self.device)
+        target_data = networkx_to_pyg(self.target_dataset).to(self.device)
+
+        # Split in train, validation and test.
+        source_data_train = source_data.subgraph(self.train_index[0])
+        source_data_val = source_data.subgraph(self.val_index[0])
+        source_data_test = source_data.subgraph(self.test_index[0])
+
+        target_data_train = target_data.subgraph(self.train_index[1])
+        target_data_val = target_data.subgraph(self.val_index[1])
+        target_data_test = target_data.subgraph(self.test_index[1])
+
+        self.source_data = source_data
+        self.source_data_train = source_data_train
+        self.source_data_val = source_data_val
+        self.source_data_test = source_data_test
+
+        self.target_data = target_data
+        self.target_data_train = target_data_train
+        self.target_data_val = target_data_val
+        self.target_data_test = target_data_test
+
+        # Create a mapping between global node indices and their position in the subgraphs
+        # (i.e. the node `57` corresponds to the 42th node in the 'source train subgraph')
+        self.global2train_source = {global_idx.item(): i for i, global_idx in enumerate(self.train_index[0])}
+        self.global2val_source = {global_idx.item(): i for i, global_idx in enumerate(self.val_index[0])}
+        self.global2test_source = {global_idx.item(): i for i, global_idx in enumerate(self.test_index[0])}
+        
+        self.global2train_target = {global_idx.item(): i for i, global_idx in enumerate(self.train_index[1])}
+        self.global2val_target = {global_idx.item(): i for i, global_idx in enumerate(self.val_index[1])}
+        self.global2test_starget = {global_idx.item(): i for i, global_idx in enumerate(self.test_index[1])}
+
+        source_data.train_index = self.train_index[0]
+        source_data.val_index = self.val_index[0]
+        source_data.test_index = self.test_index[0]
+
+        target_data.train_index = self.train_index[1]
+        target_data.val_index = self.val_index[1]
+        target_data.test_index = self.test_index[1]
+
+        print("source_data:", source_data.train_index)
+        print("target_data: ", target_data.train_index)
+        return
+
+        # [DEBUG]
+        # print("Global to subgraph example: ", self.global2train_source)
+
+    def learn_embeddings(self, patience=None):
         """
         Train the models to generate the node embeddings
         """
@@ -142,21 +205,47 @@ class SANE(NetworkAlignmentModel):
             train_examples = 0
             self.optimizer.zero_grad()
 
+            # Sample negative alignments within each training iteration to have 2 classes to discriminate. 
+            # Given the list of true cross network alingments we generate a list of the same lenght with false alignment.
+            neg_train_index = negative_sampling(self.train_index, force_undirected=True)
+
+            train_labels = torch.cat((torch.ones(self.train_index.shape[1]),     # [1, 1, ..., 1, 0, 0, ..., 0]
+                                      torch.zeros(neg_train_index.shape[1])),
+                                      dim=0).type(torch.LongTensor)
+            
+            all_train_index = torch.cat((self.train_index, neg_train_index),
+                                        dim=1)
+            
+            # Shuffle index and labels.
+            permutation = torch.randperm(all_train_index.shape[1])
+            shuffled_all_train_index = all_train_index[:, permutation]
+            shuffled_train_labels = train_labels[permutation]
+
+            # [DEBUG]
+            # print("permuataion: ", permutation)
+            # print("shuffled_all_train_index shape: ", shuffled_all_train_index.shape)
+            # print(f"shuffled_all_train_labels min: {torch.min(shuffled_all_train_index)}, max: {torch.max(shuffled_all_train_index)}")
+            # print("shuffled_train_labels unique labels: ", torch.unique(shuffled_train_labels))
+        
             # Generate embeddings.
-            source_embeddings, target_embeddings = self.embedder(source_data, target_data)
-            print(f"all:")
-            print(f"source_embeddings: {source_embeddings.shape}")
-            print(f"target_embeddings: {target_embeddings.shape}")
-            print(f"only train:")
-            source_embeddings = source_embeddings[self.train_index[0]]
-            target_embeddings = target_embeddings[self.train_index[1]]
-            print(f"source_embeddings: {source_embeddings.shape}")
-            print(f"target_embeddings: {target_embeddings.shape}")
+            source_embeddings, target_embeddings = self.embedder(self.source_data_train, self.target_data_train)
+        
+            # Take only the embeddings corresponding to the nodes in `all_train_index` so that we can try to alignate
+            # # them source to target and compare the prediction with the groundtruth labels.
+            print("global2train_source:", self.global2train_source)
+            print("Train source subgraph: ", self.source_data_train)
+            print("Source train edge index", self.source_data_train.edge_index)
+            source_local_train_index = torch.tensor([self.global2train_source[idx.item()] for idx in shuffled_all_train_index[0]])
+            target_local_train_index = torch.tensor([self.global2train_target[idx.item()] for idx in shuffled_all_train_index[1]])
+            source_embeddings = source_embeddings[source_local_train_index]
+            target_embeddings = target_embeddings[target_local_train_index]
+
+            print("source_local_train_index: ", source_local_train_index)
+            print("target_loacl_train_index: ", target_local_train_index)
+            return
 
             # Predict alignments.
-            # Use only the nodes in the `train_dict`.
             pred_links = self.mapper.pred(source_embeddings, target_embeddings)
-            print(f"predicted links shape: {pred_links.shape}")
 
             # Backward step.
             loss = self.criterion(pred_links, torch.ones(pred_links.shape[0], dtype=torch.long, device=self.device))
@@ -179,7 +268,7 @@ class SANE(NetworkAlignmentModel):
 
             with torch.no_grad():
                 # Generate embeddings.
-                source_embeddings, target_embeddings = self.embedder(source_data, target_data)
+                source_embeddings, target_embeddings = self.embedder(self.source_data_val, self.target_data_val)
 
                 # Predict alignments.
                 pred_links = self.mapper.pred(source_embeddings, target_embeddings)
