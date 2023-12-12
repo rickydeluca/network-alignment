@@ -1,4 +1,4 @@
-PD=dataspace/edi3
+PD=dataspace/ppi
 PREFIX=REGAL-d1-seed1
 TRAINRATIO=0.8
 
@@ -10,4 +10,4 @@ python network_alignment.py \
 SANE \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
 --embedding_model spectral \
---device cuda
+--device cuda \

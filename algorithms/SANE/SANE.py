@@ -1,22 +1,24 @@
-import argparse
+"""
+Learn embeddings with unsupervised learning, 
+then cross combine the network embeddings 
+using a transformer block and use supervised learning on them.
+"""
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-import tqdm
-from sklearn.linear_model import SGDClassifier
-from sklearn.metrics import f1_score
-from sklearn.multioutput import MultiOutputClassifier
+from sklearn.metrics import (auc, precision_recall_curve, roc_auc_score,
+                             roc_curve)
 from torch_geometric.data import Batch
-from torch_geometric.datasets import PPI
 from torch_geometric.loader import DataLoader, LinkNeighborLoader
 from torch_geometric.transforms import RandomLinkSplit
 from torch_geometric.utils import negative_sampling
+from tqdm import tqdm
 
 from algorithms.network_alignment_model import NetworkAlignmentModel
-from algorithms.SANE.sane_utils import (get_embedding_model, get_mapping_model,
-                                        networkx_to_pyg)
-from input.dataset import Dataset
+from algorithms.SANE.sane_utils import (PairData, get_embedding_model,
+                                        get_mapping_model, networkx_to_pyg,
+                                        read_network_dataset)
 from utils.graph_utils import load_gt
 
 
@@ -37,18 +39,23 @@ class SANE(NetworkAlignmentModel):
         self.embedding_dim = args.embedding_dim
         self.epochs = args.epochs
         self.lr = args.lr
+        self.early_stop = args.early_stop
+        self.patience = args.patience
         self.embedding_dropout = args.embedding_dropout
         self.mapping_dropout = args.mapping_dropout
         self.num_layers = args.num_layers
         self.hidden_sizes = args.hidden_sizes
         self.seed = args.seed
-
-        # Alignment parameters.
-        self.S = None
         self.embedder = None
         self.mapper = None
         self.optimizer = None
         self.criterion = None
+
+
+        # Alignment parameters.
+        self.S = None
+        self.train_dict = args.train_dict
+        self.groundtruth = args.groundtruth
 
         # Device.
         if args.device == 'cuda':
@@ -57,34 +64,6 @@ class SANE(NetworkAlignmentModel):
             self.device = torch.device('cpu')
         else:
             raise ValueError("Invalid device. Choose from: 'cpu' and 'cuda'.")
-    
-        # Load train and test groundtruths.
-        train_gt = load_gt(args.train_dict, source_dataset.id2idx, target_dataset.id2idx, 'dict')
-        test_gt = load_gt(args.groundtruth, source_dataset.id2idx, target_dataset.id2idx, 'dict')
-
-        # Build the full groundtruth and substitute the node 
-        # names with the node indices.
-        self.full_gt = {}
-        self.full_gt.update(train_gt)
-        self.full_gt.update(test_gt)
-        self.full_gt = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in self.full_gt.items()}
-
-        # Use a subset of the training dictionary to obtain a validation 
-        # dictionary, finally convert train, val and test dictionaries
-        # into edgelist tensors of shape (2, N), where N is the numeber of nodes.
-        self.train_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in train_gt.items()}
-        self.test_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in test_gt.items()}
-
-        train_and_val_index = torch.tensor([list(self.train_dict.keys()), list(self.train_dict.values())]).to(self.device)
-        split_idx = int(train_and_val_index.shape[1] * 0.8) # 20% of training as validation.
-        self.train_index = train_and_val_index[:, :split_idx]
-        self.val_index = train_and_val_index[:, split_idx:]
-        self.test_index = torch.tensor([list(self.test_dict.keys()), list(self.test_dict.values())]).to(self.device)
-
-        # [DEBUG]
-        # print("train_index_shape: ", self.train_index.shape)
-        # print("val_index_shape: ", self.val_index.shape)
-        # print("test_index_shape: ", self.test_index.shape)
 
 
     def get_alignment_matrix(self):
@@ -96,16 +75,22 @@ class SANE(NetworkAlignmentModel):
     def align(self):
         """Performs alignment from source to target dataset."""
 
-        # Init training models.
+        # Preprocess data for unsupervised learning
+        self.preprocess_data()
+
+        # Init unsupervised learning models
         self.init_models()
         self.optimizer = torch.optim.Adam(list(self.embedder.parameters()) + list(self.mapper.parameters()), lr=self.lr)
         self.criterion = torch.nn.BCEWithLogitsLoss()
 
-        # Preprocess data to create train, test and validation subnetworks.
-        self.preprocess_data()
+        # Train models and learn embeddings for both networks
+        self.learn_embeddings()
 
-        # Train models.
-        self.learn_embeddings(patience=10)
+        # Test learned embeddings
+        self.test_embeddings()
+        return
+        # Populate alignment matrix.
+        self.predict_alignments()
 
         return self.S
     
@@ -116,14 +101,14 @@ class SANE(NetworkAlignmentModel):
         """
 
         # Get feature dimension.
-        feature_dim1 = self.source_dataset.features.shape[1]
-        feature_dim2 = self.target_dataset.features.shape[1]
-        max_feature_dim = max(feature_dim1, feature_dim2)
+        # feature_dim1 = self.source_dataset.features.shape[1]
+        # feature_dim2 = self.target_dataset.features.shape[1]
+        # max_feature_dim = max(feature_dim1, feature_dim2)
 
         # Init models.
         self.embedder = get_embedding_model(
             self.embedding_model,
-            in_channels=max_feature_dim,
+            in_channels=self.train_data.num_features,
             hidden_channels=self.hidden_sizes,
             out_channels=self.embedding_dim,
             num_layers=self.num_layers,
@@ -138,344 +123,311 @@ class SANE(NetworkAlignmentModel):
 
 
     def preprocess_data(self):
-        # Convert networks in a format suitable for PyG.
-        source_data = networkx_to_pyg(self.source_dataset).to(self.device)
-        target_data = networkx_to_pyg(self.target_dataset).to(self.device)
+        # Read network datasets in a format suitable for pytorch geometric Data object
+        data_s = read_network_dataset(self.source_dataset, pos_info=True)
+        data_t = read_network_dataset(self.target_dataset, pos_info=True)
 
-        # Split in train, validation and test.
-        source_data_train = source_data.subgraph(self.train_index[0])
-        source_data_val = source_data.subgraph(self.val_index[0])
-        source_data_test = source_data.subgraph(self.test_index[0])
+        print(f'data_s: {data_s}')
+        print(f'data_t: {data_t}')
 
-        target_data_train = target_data.subgraph(self.train_index[1])
-        target_data_val = target_data.subgraph(self.val_index[1])
-        target_data_test = target_data.subgraph(self.test_index[1])
-
-        self.source_data = source_data
-        self.source_data_train = source_data_train
-        self.source_data_val = source_data_val
-        self.source_data_test = source_data_test
-
-        self.target_data = target_data
-        self.target_data_train = target_data_train
-        self.target_data_val = target_data_val
-        self.target_data_test = target_data_test
-
-        # Create a mapping between global node indices and their position in the subgraphs
-        # (i.e. the node `57` corresponds to the 42th node in the 'source train subgraph')
-        self.global2train_source = {global_idx.item(): i for i, global_idx in enumerate(self.train_index[0])}
-        self.global2val_source = {global_idx.item(): i for i, global_idx in enumerate(self.val_index[0])}
-        self.global2test_source = {global_idx.item(): i for i, global_idx in enumerate(self.test_index[0])}
+        # Prepare for unsupervised learning:
+        # - Split both source and target in train, test and val
+        splitter = RandomLinkSplit(
+            num_val=0.1,
+            num_test=0.2,
+            disjoint_train_ratio=0.0,
+            add_negative_train_samples=False,    # it will be performed later
+            is_undirected=True
+        )
         
-        self.global2train_target = {global_idx.item(): i for i, global_idx in enumerate(self.train_index[1])}
-        self.global2val_target = {global_idx.item(): i for i, global_idx in enumerate(self.val_index[1])}
-        self.global2test_starget = {global_idx.item(): i for i, global_idx in enumerate(self.test_index[1])}
+        train_data_s, val_data_s, test_data_s = splitter(data_s)
+        train_data_t, val_data_t, test_data_t = splitter(data_t)
 
-        source_data.train_index = self.train_index[0]
-        source_data.val_index = self.val_index[0]
-        source_data.test_index = self.test_index[0]
+        # print(f'train_data_s: {train_data_s}')
+        # print(f'val_data_s: {val_data_s}')
+        # print(f'test_data_s: {test_data_s}')
 
-        target_data.train_index = self.train_index[1]
-        target_data.val_index = self.val_index[1]
-        target_data.test_index = self.test_index[1]
+        # - Group source and target networks to perform sampling
+        train_data = Batch.from_data_list([train_data_s, train_data_t], follow_batch=['x', 'edge_weight', 'edge_attr', 'edge_label', 'edge_labels_index'])
+        val_data = Batch.from_data_list([val_data_s, val_data_t], follow_batch=['x', 'edge_weight', 'edge_attr', 'edge_label', 'edge_labels_index'])
+        test_data = Batch.from_data_list([test_data_s, test_data_t], follow_batch=['x', 'edge_weight', 'edge_attr', 'edge_label', 'edge_labels_index'])
 
-        print("source_data:", source_data.train_index)
-        print("target_data: ", target_data.train_index)
-        return
+        # - Define LinkNeighbor dataloaders
+        train_ln_loader = LinkNeighborLoader(
+            data=train_data,
+            subgraph_type='bidirectional',
+            num_neighbors=[20, 10],
+            neg_sampling_ratio=2.0,
+            edge_label_index=train_data.edge_label_index,
+            edge_label=train_data.edge_label,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=6,
+            persistent_workers=True
+        )
 
-        # [DEBUG]
-        # print("Global to subgraph example: ", self.global2train_source)
+        val_ln_loader = LinkNeighborLoader(
+            data=val_data,
+            subgraph_type="bidirectional",
+            num_neighbors=[20, 10],
+            edge_label_index=val_data.edge_label_index,
+            edge_label=val_data.edge_label,
+            batch_size=self.batch_size,
+            shuffle=False
+        )
 
-    def learn_embeddings(self, patience=None):
+        test_ln_loader = LinkNeighborLoader(
+            data=test_data,
+            subgraph_type="bidirectional",
+            num_neighbors=[20, 10],
+            edge_label_index=test_data.edge_label_index,
+            edge_label=test_data.edge_label,
+            batch_size=self.batch_size,
+            shuffle=False
+        )
+
+        # - Save everything globally
+        self.train_data = train_data
+        self.val_data = val_data
+        self.test_data = test_data
+        self.train_ln_loader = train_ln_loader
+        self.val_ln_loader = val_ln_loader
+        self.test_ln_loader = test_ln_loader
+        
+
+    def learn_embeddings(self):
         """
         Train the models to generate the node embeddings
         """
-        best_val_loss = float('inf')
-        patience_counter = 0
-        best_model_state_dict = None
+
+        if self.early_stop:
+            patience = self.patience
+            best_val_loss = float('inf')
+            patience_counter = 0
+            best_model_state_dict = None
 
         for epoch in range(self.epochs):
+            print(f"Epoch {epoch+1}")
             
-            # TRAINING
-
-            # Setup training.
+            # ============
+            #   TRAINING
+            # ============
+            # Setup training    
             self.embedder.train()
             self.mapper.train()
             train_loss = 0.0
             train_examples = 0
-            self.optimizer.zero_grad()
 
-            # Sample negative alignments within each training iteration to have 2 classes to discriminate. 
-            # Given the list of true cross network alingments we generate a list of the same lenght with false alignment.
-            neg_train_index = negative_sampling(self.train_index, force_undirected=True)
+            # Mini-batching
+            for batch in tqdm(self.train_ln_loader, desc=f"Epoch {epoch} training:"):
+                
+                batch = batch.to(self.device)
+                self.optimizer.zero_grad()
 
-            train_labels = torch.cat((torch.ones(self.train_index.shape[1]),     # [1, 1, ..., 1, 0, 0, ..., 0]
-                                      torch.zeros(neg_train_index.shape[1])),
-                                      dim=0).type(torch.LongTensor)
-            
-            all_train_index = torch.cat((self.train_index, neg_train_index),
-                                        dim=1)
-            
-            # Shuffle index and labels.
-            permutation = torch.randperm(all_train_index.shape[1])
-            shuffled_all_train_index = all_train_index[:, permutation]
-            shuffled_train_labels = train_labels[permutation]
+                # Generate embeddings
+                if self.embedding_model == 'sage':
+                    h = self.embedder(batch.x, batch.edge_index)
+                else:
+                    raise("Only GraphSAGE was implemented within this SANE version!")
+                
+                # Predict links
+                h_src = h[batch.edge_label_index[0]]
+                h_dst = h[batch.edge_label_index[1]]
+                # link_pred = (h_src * h_dst).sum(dim=-1) # Inner product
+                link_pred = self.mapper.pred(h_src, h_dst)
 
-            # [DEBUG]
-            # print("permuataion: ", permutation)
-            # print("shuffled_all_train_index shape: ", shuffled_all_train_index.shape)
-            # print(f"shuffled_all_train_labels min: {torch.min(shuffled_all_train_index)}, max: {torch.max(shuffled_all_train_index)}")
-            # print("shuffled_train_labels unique labels: ", torch.unique(shuffled_train_labels))
-        
-            # Generate embeddings.
-            source_embeddings, target_embeddings = self.embedder(self.source_data_train, self.target_data_train)
-        
-            # Take only the embeddings corresponding to the nodes in `all_train_index` so that we can try to alignate
-            # # them source to target and compare the prediction with the groundtruth labels.
-            print("global2train_source:", self.global2train_source)
-            print("Train source subgraph: ", self.source_data_train)
-            print("Source train edge index", self.source_data_train.edge_index)
-            source_local_train_index = torch.tensor([self.global2train_source[idx.item()] for idx in shuffled_all_train_index[0]])
-            target_local_train_index = torch.tensor([self.global2train_target[idx.item()] for idx in shuffled_all_train_index[1]])
-            source_embeddings = source_embeddings[source_local_train_index]
-            target_embeddings = target_embeddings[target_local_train_index]
+                # Backward step
+                loss = self.criterion(link_pred, batch.edge_label)
+                loss.backward()
+                self.optimizer.step()
 
-            print("source_local_train_index: ", source_local_train_index)
-            print("target_loacl_train_index: ", target_local_train_index)
-            return
+                train_loss += float(loss) * link_pred.numel()
+                train_examples += link_pred.numel()
 
-            # Predict alignments.
-            pred_links = self.mapper.pred(source_embeddings, target_embeddings)
 
-            # Backward step.
-            loss = self.criterion(pred_links, torch.ones(pred_links.shape[0], dtype=torch.long, device=self.device))
-            loss.backward()
-            self.optimizer.step()
+            print(f"\tTrain loss: {train_loss/train_examples:.4f}")
 
-            train_loss += float(loss) * pred_links.numel()
-            train_examples += pred_links.numel()
-            train_loss /= train_examples
+            # ==============
+            #   VALIDATION
+            # ==============
 
-            print(f"train loss: {train_loss}")
-
-            # VALIDATION
-
-            # Setup validation.
+            # Setup validation
             self.embedder.eval()
             self.mapper.eval()
             val_loss = 0.0
             val_examples = 0
 
             with torch.no_grad():
-                # Generate embeddings.
-                source_embeddings, target_embeddings = self.embedder(self.source_data_val, self.target_data_val)
+                for batch in tqdm(self.val_ln_loader, desc=f"Epoch {epoch} validation:"):
+                    batch = batch.to(self.device)
 
-                # Predict alignments.
-                pred_links = self.mapper.pred(source_embeddings, target_embeddings)
-
-                # Compute loss.
-                loss = self.criterion(pred_links, 0)
-                val_loss += float(loss) * pred_links.numel()
-                val_examples += pred_links.numel()
-                val_loss /= val_examples
-
-
-            # EARLY STOPPING
-
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_model_state_dict = {   # Best model found till now.
-                    'embedder': self.embedder.state_dict(),
-                    'mapper': self.mapper.state_dict()
-                }
-                patience_counter = 0
-            else:
-                patience_counter += 1
-                # print(f"*** Patience counter: {patience_counter} ***")
-
-            if patience_counter >= patience:
-                print("*** Early stopping triggered! ***", end="\n")
-                break
-        
-        # Load best parameters.
-        self.embedder.load_state_dict(best_model_state_dict['embedder'])
-        self.mapper.load_state_dict(best_model_state_dict['mapper'])
-
-
-    """
-    def train_unsup(self, network='source'):
-        # Convert the NetworkX to PyG format
-        dataset = self.source_dataset if network == 'source' else self.target_dataset
-        data, idx2id = networkx_to_pyg(dataset)
-
-        # DEBUG
-        print(f"data: {data}")
-
-        # Split both networks in train, val and test
-        transform = RandomLinkSplit(
-            num_val=0.2,
-            num_test=0.0,
-            disjoint_train_ratio=0.3,
-            add_negative_train_samples=False,   # We will add them in the SAGE model
-            is_undirected=True,
-        )
-
-        train_data, val_data, test_data = transform(data)
-
-        # DEBUG
-        print("Unique train labels:", torch.unique(train_data.edge_label))
-        print("Unique val labels:", torch.unique(val_data.edge_label))
-        print("Unique test labels:", torch.unique(test_data.edge_label))
-
-        # Get data loaders. Here we sample the subgraphs using the 
-        # link neighbors.
-        train_loader = LinkNeighborLoader(
-            data=train_data,
-            subgraph_type="bidirectional",
-            num_neighbors=[10, 10],
-            neg_sampling="binary",
-            num_workers=6,
-            edge_label_index=train_data.edge_label_index,
-            batch_size=self.batch_size,
-            shuffle=True,
-        )
-
-        val_loader = LinkNeighborLoader(
-            data=val_data,
-            subgraph_type="bidirectional",
-            num_neighbors=[10, 10],
-            edge_label_index=val_data.edge_label_index,
-            edge_label=val_data.edge_label,
-            batch_size=self.batch_size,
-            shuffle=False,
-        )
-
-        # Define models
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-        embedder = get_embedding_model(
-            model=self.embedding,
-            in_channels=train_data.num_features,
-            hidden_channels=self.hidden_size,
-            num_layers=self.num_layers,
-            out_channels=self.output_size,
-            dropout=0.2
-        ).to(device)
-
-        predictor = get_prediction_model(self.prediction, input_dim=self.output_size).to(device)
-
-        # Define optimizer and criterion
-        optimizer = torch.optim.Adam(list(embedder.parameters()) + list(predictor.parameters()), lr=self.lr)
-        criterion = torch.nn.BCEWithLogitsLoss()
-
-        # ====================
-        #   TRAIN & VALIDATE
-        # ====================
-        best_val_loss = float('inf')
-        patience = 10  # Number of epochs to wait for improvement
-        patience_counter = 0
-        best_model_state_dict = None
-
-        for epoch in range(self.epochs):
-            print(f"=== Epoch {epoch} ===")
-
-            # TRAINING
-            embedder.train()
-            predictor.train()
-
-            train_loss = 0.0
-            train_examples = 0
-
-            # Mini-batching
-            for batch in tqdm.tqdm(train_loader, desc="Training: "):
-                
-                batch = batch.to(device)
-                optimizer.zero_grad()
-
-                # DEBUG
-                # print(batch)
-                # print(f"x dtype: {batch.x.dtype}")
-                # print(f"edgel_label_index dtype: {batch.edge_label_index.dtype}")
-                # print(f"edgel_index dtype: {batch.edge_index.dtype}")
-                
-                # Get the embeddings
-                # (TODO: Concat with hypervectors)
-                h = embedder(batch.x, batch.edge_label_index, edge_attr=batch.edge_attr, num_sampled_edges_per_hop=self.batch_size)
-                h_src = h[batch.edge_label_index[0]]
-                h_dst = h[batch.edge_label_index[1]]
-                
-                # Predict links
-                link_pred = predictor.pred(h_src, h_dst)
-
-                # Backward step
-                loss = criterion(link_pred, batch.edge_label)
-                loss.backward()
-                optimizer.step()
-
-                train_loss += float(loss) * link_pred.numel()
-                train_examples += link_pred.numel()
-
-            print(f"Train Loss: {train_loss / train_examples:.4f}")
-
-            # VALIDATION
-            embedder.eval()
-            predictor.eval()
-
-            val_loss = 0.0
-            val_examples = 0
-
-            with torch.no_grad():
-                for batch in tqdm.tqdm(val_loader, desc="Validation: "):
+                    # Generate embeddings
+                    if self.embedding_model == 'sage':
+                        h = self.embedder(batch.x, batch.edge_index)
+                    else:
+                        raise("Only GraphSAGE was implemented within this SANE version!")
                     
-                    batch = batch.to(device)
-
-                    # Get the embeddings
-                    # (TODO: Concat with hypervectors)
-                    h = embedder(batch.x, batch.edge_label_index, edge_attr=batch.edge_attr, num_sampled_edges_per_hop=self.batch_size)
+                    # Predict links
                     h_src = h[batch.edge_label_index[0]]
                     h_dst = h[batch.edge_label_index[1]]
+                    # link_pred = (h_src * h_dst).sum(dim=-1)
+                    link_pred = self.mapper.pred(h_src, h_dst)
 
-                    # Predict links
-                    link_pred = predictor.pred(h_src, h_dst)
-
-                    loss = criterion(link_pred, batch.edge_label)
-
+                    # Compute validation loss
+                    loss = self.criterion(link_pred, batch.edge_label)
                     val_loss += float(loss) * link_pred.numel()
                     val_examples += link_pred.numel()
 
             val_loss /= val_examples
-            print(f"Validation Loss: {val_loss:.4f}", end="\n\n")
+            print(f"Validation loss: {val_loss:.4f}", end="\n\n")
 
-            # EARLY STOPPING
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            # Early Stopping
+            if self.early_stop:
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_model_state_dict = {   # Best model found till now.
+                        'embedder': self.embedder.state_dict(),
+                        'mapper': self.mapper.state_dict()
+                    }
+                    patience_counter = 0
+                    print("New best model found!")
+                else:
+                    patience_counter += 1
+                    # print(f"*** Patience counter: {patience_counter} ***")
 
-                # Save the best model found till now
-                best_model_state_dict = {
-                    'embedder': embedder.state_dict(),
-                    'predictor': predictor.state_dict(),
-                }
-
-                patience_counter = 0
-
-            else:
-                patience_counter += 1
-                print(f"*** Patience counter: {patience_counter} ***")
-
-            if patience_counter >= patience:
-                print("*** Early stopping triggered!***", end="\n")
-                break
+                if patience_counter >= patience:
+                    print("*** Early stopping triggered! ***", end="\n")
+                    break
         
-        # Load best state dicts
-        embedder.load_state_dict(best_model_state_dict['embedder'])
-        predictor.load_state_dict(best_model_state_dict['predictor'])
+        # If trained with early stopping, load best models.
+        if self.early_stop:
+            self.embedder.load_state_dict(best_model_state_dict['embedder'])
+            self.mapper.load_state_dict(best_model_state_dict['mapper'])
+            print(f"Best val loss: {best_val_loss:.4f}", end="\n\n")
 
-        # Get the node embeddings for the input network
-        # using the best embedding model.
-        embedder.eval()
-        data = data.to(device)
-        with torch.no_grad():
-            final_h = embedder(data.x, data.edge_index)
 
-        return final_h
+    def get_subgraph(self, data, node_index):
         """
+        Generate the subgraph of the `data` object using the node indices
+        in `node_index` subset.
+        Returns the subgraph and a dictionary that maps the global node 
+        indices to the new indices in the subgraph
+        """
+        node_subset = torch.unique(node_index, sorted=True)
+        full2sub = {node.item(): idx for idx, node in enumerate(node_subset)}
+        subgraph = data.subgraph(node_subset)
+
+        return subgraph, full2sub
+    
+    
+    def test_embeddings(self):
+
+        # Setup test
+        self.embedder.eval()
+        self.mapper.eval()
+
+        true_labels = []
+        predicted_scores = []
+        tp, fp, tn, fn = 0, 0, 0, 0
+        test_loss = 0.0
+        test_examples = 0
+
+        # Test
+        with torch.no_grad():
+            for batch in tqdm(self.test_ln_loader, desc=f"Test:"):
+                batch = batch.to(self.device)
+
+                # Generate embeddings
+                if self.embedding_model == 'sage':
+                    h = self.embedder(batch.x, batch.edge_index)
+                else:
+                    raise("Only GraphSAGE was implemented within this SANE version!")
+                
+                # Predict links
+                h_src = h[batch.edge_label_index[0]]
+                h_dst = h[batch.edge_label_index[1]]
+                # link_pred = (h_src * h_dst).sum(dim=-1)
+                link_pred = self.mapper.pred(h_src, h_dst)
+
+                # Compute validation loss
+                loss = self.criterion(link_pred, batch.edge_label)
+                test_loss += float(loss) * link_pred.numel()
+                test_examples += link_pred.numel()
+
+                # Convert logits to probabilities using sigmoid and store them
+                predicted_probs = torch.sigmoid(link_pred).cpu().numpy()
+                true_labels.extend(batch.edge_label.cpu().numpy())
+                predicted_scores.extend(predicted_probs)
+
+                # Class predictions using a threshold of 0.5
+                preds_class = (predicted_probs > 0.5).astype(int)
+                test_labels_class = batch.edge_label.cpu().numpy()
+
+                tp += np.sum((preds_class == 1) & (test_labels_class == 1))
+                fp += np.sum((preds_class == 1) & (test_labels_class == 0))
+                tn += np.sum((preds_class == 0) & (test_labels_class == 0))
+                fn += np.sum((preds_class == 0) & (test_labels_class == 1))
+        
+        # Compute metrics
+        test_loss /= test_examples
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+        f1 = 2 * (precision * recall) / (precision + recall)
+        accuracy = (tp + tn) / (tp + fp + tn + fn)
+
+        # Compute Precision-Recall AUC
+        precision_array, recall_array, _ = precision_recall_curve(true_labels, predicted_scores)
+        pr_auc = auc(recall_array, precision_array)
+
+        # Compute ROC curve and ROC-AUC
+        fpr, tpr, _ = roc_curve(true_labels, predicted_scores)
+        roc_auc = roc_auc_score(true_labels, predicted_scores)
+
+        print(f"Test Loss: {test_loss:.4f}")
+        print("-----------------")
+        print(f"Precision: {precision:.4f}")
+        print(f"Recall: {recall:.4f}")
+        print(f"F1 Score: {f1:.4f}")
+        print(f"Accuracy: {accuracy:.4f}")
+        print("----------------------------")
+        print(f"Precision-Recall AUC: {pr_auc:.4f}")
+        print(f"ROC-AUC: {roc_auc:.4f}")
+
+
+    def predict_alignments(self):
+        self.embedder.eval()
+        self.mapper.eval()
+        
+        with torch.no_grad():
+            # Compute node embedding for source and target networks.
+            source_embeddings, target_embeddings = self.embedder(self.source_data, self.target_data)
+            print("source_embeddings", source_embeddings.shape)
+            print("target_embeddings", target_embeddings.shape)
+
+            # Use broadcasting to create extended embeddings where each node in
+            # the source network is paired with each node in the target network.
+            N = source_embeddings.shape[0]
+            M = target_embeddings.shape[0]
+            alignment_matrix = np.zeros((N, M))
+
+            # Prediction only on test dataset
+            for source_idx in self.test_index[0]:
+                source_embeddings_extended = []
+                target_embeddings_extended = []
+
+                for target_idx in self.test_index[1]:
+                    source_embeddings_extended.append(source_embeddings[source_idx])
+                    target_embeddings_extended.append(target_embeddings[target_idx])
+
+                source_embeddings_extended = torch.stack(source_embeddings_extended)
+                target_embeddings_extended = torch.stack(target_embeddings_extended)
+                
+                pred_links = self.mapper.pred(source_embeddings_extended, target_embeddings_extended)
+                pred_probs = torch.sigmoid(pred_links).detach().cpu().numpy()
+
+                for j, target_idx in enumerate(self.test_index[1]):
+                    alignment_matrix[source_idx, target_idx] = pred_probs[j]
+
+            print("alignment_matrix: ", alignment_matrix)
+            self.S = alignment_matrix
+

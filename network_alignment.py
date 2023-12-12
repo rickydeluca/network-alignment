@@ -133,6 +133,8 @@ def parse_args():
     
     parser_SANE.add_argument('--epochs', type=int, default=100)
     parser_SANE.add_argument('--lr', type=float, default=0.0003)
+    parser_SANE.add_argument('--early_stop', action="store_true", default=False, help="Train with early stopping (default: False)")
+    parser_SANE.add_argument('--patience', type=int, default=10, help="Number of epochs to wait for improvement if using `early_stop` (default: 10)")
     parser_SANE.add_argument('--batch_size', type=int, default=256, help="Batch size (default: 256).")
     parser_SANE.add_argument('--embedding_dropout', type=float, default=0.2, help="Dropout probability for embedding model (default: 0.2).")
     parser_SANE.add_argument('--mapping_dropout', type=float, default=0.5, help="Dropout probability for mapping model (default: 0.5).")
