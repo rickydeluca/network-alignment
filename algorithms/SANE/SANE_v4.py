@@ -1,7 +1,5 @@
 """
-Learn embeddings with unsupervised learning, 
-then cross combine the network embeddings 
-using a transformer block and use supervised learning on them.
+Learn embeddings and cross combine all in once.
 """
 
 import numpy as np
@@ -75,30 +73,23 @@ class SANE(NetworkAlignmentModel):
 
     def align(self):
         """Performs alignment from source to target dataset."""
+        
+        self.preprocess_data()
+        self.init_models()
 
-        self.unsupervised_learning()
-        self.supervised_learning()
+        self.optimizer = torch.optim.Adam(
+            list(self.embedder.parameters()) +
+            list(self.crosser.parameters()) + 
+            list(self.mapper.parameters()),
+            lr=self.lr)
+        self.criterion = torch.nn.BCEWithLogitsLoss()
 
-        # Populate alignment matrix
+        self.learn_embeddings()
+        self.test_embeddings()
+
         self.predict_alignments()
 
         return self.S
-    
-
-    def unsupervised_learning(self):
-        # Preprocess data for unsupervised learning
-        self.preprocess_data()
-
-        # Init unsupervised learning models
-        self.init_models()
-        self.optimizer = torch.optim.Adam(list(self.embedder.parameters()) + list(self.mapper.parameters()), lr=self.lr)
-        self.criterion = torch.nn.BCEWithLogitsLoss()
-
-        # Train models and learn embeddings for both networks
-        self.learn_embeddings()
-
-        # Test learned embeddings
-        self.test_embeddings()
 
     
     def supervised_learning(self):
@@ -123,11 +114,18 @@ class SANE(NetworkAlignmentModel):
             dropout=self.embedding_dropout
         ).to(self.device)
 
+        self.crosser = get_mapping_model(
+            'cross_attention',
+            k=self.embedding_dim,
+            heads=2
+        ).to(self.device)
+
         self.mapper = get_mapping_model(
             self.mapping_model,
             input_dim=self.embedding_dim,
             dropout=self.mapping_dropout
         ).to(self.device)
+
 
 
     def preprocess_data(self):
@@ -138,8 +136,8 @@ class SANE(NetworkAlignmentModel):
         print(f'data_s: {data_s}')
         print(f'data_t: {data_t}')
 
-        # Prepare for unsupervised learning:
-        # - Split both source and target in train, test and val
+        # UNSUPERVISED LEARNING
+        # Split both source and target in train, test and val
         splitter = RandomLinkSplit(
             num_val=0.1,
             num_test=0.2,
@@ -151,16 +149,12 @@ class SANE(NetworkAlignmentModel):
         train_data_s, val_data_s, test_data_s = splitter(data_s)
         train_data_t, val_data_t, test_data_t = splitter(data_t)
 
-        # print(f'train_data_s: {train_data_s}')
-        # print(f'val_data_s: {val_data_s}')
-        # print(f'test_data_s: {test_data_s}')
-
         # - Group source and target networks to perform sampling
         train_data = Batch.from_data_list([train_data_s, train_data_t], follow_batch=['x', 'edge_weight', 'edge_attr', 'edge_label', 'edge_labels_index'])
         val_data = Batch.from_data_list([val_data_s, val_data_t], follow_batch=['x', 'edge_weight', 'edge_attr', 'edge_label', 'edge_labels_index'])
         test_data = Batch.from_data_list([test_data_s, test_data_t], follow_batch=['x', 'edge_weight', 'edge_attr', 'edge_label', 'edge_labels_index'])
 
-        # - Define LinkNeighbor dataloaders
+        # Define LinkNeighbor dataloaders
         train_ln_loader = LinkNeighborLoader(
             data=train_data,
             subgraph_type='bidirectional',
@@ -194,7 +188,7 @@ class SANE(NetworkAlignmentModel):
             shuffle=False
         )
 
-        # - Save everything globally
+        # Save everything globally
         self.data_s = data_s
         self.data_t = data_t
         self.train_data = train_data
@@ -204,6 +198,43 @@ class SANE(NetworkAlignmentModel):
         self.val_ln_loader = val_ln_loader
         self.test_ln_loader = test_ln_loader
         
+        # SUPERVISED LEARNING
+        if self.train_dict is not None:
+            # Load groundtruth alignmnets
+            train_gt = load_gt(self.train_dict, self.source_dataset.id2idx, self.target_dataset.id2idx, 'dict')
+            test_gt = load_gt(self.groundtruth, self.source_dataset.id2idx, self.target_dataset.id2idx, 'dict')
+            full_gt = {}
+            full_gt.update(train_gt)
+            full_gt.update(test_gt)
+
+            # Convert names to indices
+            train_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in train_gt.items()}
+            test_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in test_gt.items()}
+            full_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in full_gt.items()}
+
+            # Trasform to `edge_index` of shape (2, N) and use a subset of
+            # training set as validation
+            train_and_val_index = torch.tensor([list(train_dict.keys()), list(train_dict.values())]).to(self.device)
+            test_index = torch.tensor([list(test_dict.keys()), list(test_dict.values())]).to(self.device)
+            full_index = torch.tensor([list(full_dict.keys()), list(full_dict.values())]).to(self.device)
+
+            split_size = int(0.8 * train_and_val_index.size(1))
+            indices = torch.randperm(train_and_val_index.size(1))   # split randomly
+            train_index = train_and_val_index[:, indices[:split_size]]
+            val_index = train_and_val_index[:, indices[split_size:]]
+
+
+            # Save globaly
+            self.train_gt = train_gt
+            self.test_gt = test_gt
+            self.full_gt = full_gt
+            self.train_dict = train_dict
+            self.test_dict = test_dict
+            self.full_dict = full_dict
+            self.train_index = train_index
+            self.val_index = val_index
+            self.test_index = test_index
+            self.full_index = full_index
 
     def learn_embeddings(self):
         """
@@ -224,9 +255,12 @@ class SANE(NetworkAlignmentModel):
             # ============
             # Setup training    
             self.embedder.train()
+            self.crosser.train()
             self.mapper.train()
-            train_loss = 0.0
-            train_examples = 0
+
+            # UNSUPERVISED
+            unsup_train_loss = 0.0
+            unsup_train_examples = 0
 
             # Mini-batching
             for batch in tqdm(self.train_ln_loader, desc=f"Epoch {epoch} training:"):
@@ -250,11 +284,67 @@ class SANE(NetworkAlignmentModel):
                 loss.backward()
                 self.optimizer.step()
 
-                train_loss += float(loss) * link_pred.numel()
-                train_examples += link_pred.numel()
+                unsup_train_loss += float(loss) * link_pred.numel()
+                unsup_train_examples += link_pred.numel()
 
+            unsup_train_loss /= unsup_train_examples
 
-            print(f"\tTrain loss: {train_loss/train_examples:.4f}")
+            # SUPERVISED
+            sup_train_loss = 0.0
+            sup_train_examples = 0
+            self.optimizer.zero_grad()
+
+            # Sample negative alignments
+            pos_train_aligns = self.train_index
+            num_pos_train_aligns = pos_train_aligns.shape[1]
+  
+            neg_train_aligns = negative_sampling(
+                pos_train_aligns,
+                num_nodes=(
+                    torch.unique(self.train_index[0]).shape[0],
+                    torch.unique(self.train_index[1]).shape[0]),
+                num_neg_samples=num_pos_train_aligns * 2,   # Neg ratio of 2
+                force_undirected=True
+            )      
+            num_neg_train_aligns = neg_train_aligns.shape[1]
+
+            # Generate labels (1: positive align, 0: negative align)
+            train_aligns = torch.cat((pos_train_aligns, neg_train_aligns), dim=1)
+            train_labels = torch.cat((torch.ones(num_pos_train_aligns),
+                                      torch.zeros(num_neg_train_aligns)),
+                                      dim=0)
+            num_train_aligns = train_aligns.shape[1]
+
+            # Shuffle alignment indices and labels
+            permutation = torch.randperm(num_train_aligns)
+            train_aligns = train_aligns[:, permutation].to(self.device)
+            train_labels = train_labels[permutation].to(self.device)
+
+            # Generate embeddings
+            source_embeddings = self.embedder(self.data_s.x, self.data_s.edge_index).unsqueeze(0)
+            target_embeddings = self.embedder(self.data_t.x, self.data_t.edge_index).unsqueeze(0)
+            
+            # Apply transformer with cross attention module
+            y_source2target, y_target2source = self.crosser(source_embeddings, target_embeddings)
+
+            # Get the crossed embeddings corresponding to the nodes in `train_aligns`
+            y_source2target = y_source2target[:, train_aligns[0]].squeeze(0)
+            y_target2source = y_target2source[:, train_aligns[1]].squeeze(0)
+
+            # Compute cosine similarity
+            pred_aligns = self.mapper.pred(y_source2target, y_target2source)
+
+            # Backward step
+            loss = self.criterion(pred_aligns, train_labels)
+            loss.backward()
+            self.optimizer.step()
+
+            sup_train_loss += float(loss) * pred_aligns.numel()
+            sup_train_examples += pred_aligns.numel()
+            sup_train_loss /= sup_train_examples
+
+            print(f"Unsupervised train loss: {unsup_train_loss:.4f}")
+            print(f"Supervised train loss: {sup_train_loss:.4f}")
 
             # ==============
             #   VALIDATION
@@ -262,11 +352,14 @@ class SANE(NetworkAlignmentModel):
 
             # Setup validation
             self.embedder.eval()
+            self.crosser.eval()
             self.mapper.eval()
-            val_loss = 0.0
-            val_examples = 0
 
+            # UNSUPERVISED
             with torch.no_grad():
+                unsup_val_loss = 0.0
+                unsup_val_examples = 0
+
                 for batch in tqdm(self.val_ln_loader, desc=f"Epoch {epoch} validation:"):
                     batch = batch.to(self.device)
 
@@ -283,18 +376,71 @@ class SANE(NetworkAlignmentModel):
 
                     # Compute validation loss
                     loss = self.criterion(link_pred, batch.edge_label)
-                    val_loss += float(loss) * link_pred.numel()
-                    val_examples += link_pred.numel()
+                    unsup_val_loss += float(loss) * link_pred.numel()
+                    unsup_val_examples += link_pred.numel()
 
-            val_loss /= val_examples
-            print(f"Validation loss: {val_loss:.4f}", end="\n\n")
+                unsup_val_loss /= unsup_val_examples
+
+                # SUPERVISED
+                sup_val_loss = 0.0
+                sup_val_examples = 0
+
+                # Sample negative alignments
+                pos_val_aligns = self.val_index
+                num_pos_val_aligns = pos_val_aligns.shape[1]
+  
+                neg_val_aligns = negative_sampling(
+                    pos_val_aligns,
+                    num_nodes=(
+                        torch.unique(self.val_index[0]).shape[0],
+                        torch.unique(self.val_index[1]).shape[0]),
+                    num_neg_samples=num_pos_val_aligns * 2,   # Neg ratio of 2
+                    force_undirected=True
+                )      
+                num_neg_val_aligns = neg_val_aligns.shape[1]
+
+                # Generate labels (1: positive align, 0: negative align)
+                val_aligns = torch.cat((pos_val_aligns, neg_val_aligns), dim=1)
+                val_labels = torch.cat((torch.ones(num_pos_val_aligns),
+                                        torch.zeros(num_neg_val_aligns)),
+                                        dim=0)
+                num_val_aligns = val_aligns.shape[1]
+
+                # Shuffle alignment indices and labels
+                permutation = torch.randperm(num_val_aligns)
+                val_aligns = val_aligns[:, permutation].to(self.device)
+                val_labels = val_labels[permutation].to(self.device)
+
+                # Generate embeddings
+                source_embeddings = self.embedder(self.data_s.x, self.data_s.edge_index).unsqueeze(0)
+                target_embeddings = self.embedder(self.data_t.x, self.data_t.edge_index).unsqueeze(0)
+            
+                # Apply transformer with cross attention module
+                y_source2target, y_target2source = self.crosser(source_embeddings, target_embeddings)
+
+                # Get the crossed embeddings corresponding to the nodes in `train_aligns`
+                y_source2target = y_source2target[:, val_aligns[0]].squeeze(0)
+                y_target2source = y_target2source[:, val_aligns[1]].squeeze(0)
+
+                # Compute cosine similarity
+                pred_aligns = self.mapper.pred(y_source2target, y_target2source)
+
+                # Compute loss step
+                loss = self.criterion(pred_aligns, val_labels)
+                sup_val_loss += float(loss) * pred_aligns.numel()
+                sup_val_examples += pred_aligns.numel()
+                sup_val_loss /= sup_val_examples
+
+            print(f"Unsupervised val loss: {unsup_val_loss:.4f}")
+            print(f"Supervised val loss: {sup_val_loss:.4f}")
 
             # Early Stopping
             if self.early_stop:
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
+                if sup_val_loss < best_val_loss:
+                    best_val_loss = sup_val_loss
                     best_model_state_dict = {   # Best model found till now.
                         'embedder': self.embedder.state_dict(),
+                        'crosser': self.crosser.state_dict(),
                         'mapper': self.mapper.state_dict()
                     }
                     patience_counter = 0
@@ -310,6 +456,7 @@ class SANE(NetworkAlignmentModel):
         # If trained with early stopping, load best models.
         if self.early_stop:
             self.embedder.load_state_dict(best_model_state_dict['embedder'])
+            self.crosser.load_state_dict(best_model_state_dict['crosser'])
             self.mapper.load_state_dict(best_model_state_dict['mapper'])
             print(f"Best val loss: {best_val_loss:.4f}", end="\n\n")
     
@@ -389,131 +536,6 @@ class SANE(NetworkAlignmentModel):
         print(f"Precision-Recall AUC:\t{pr_auc:.4f}")
         print(f"ROC-AUC:\t\t{roc_auc:.4f}")
         print("\n")
-
-
-    def get_subgraph(self, data, node_index):
-        """
-        Generate the subgraph of the `data` object using the node indices
-        in `node_index` subset.
-        Returns the subgraph and a dictionary that maps the global node 
-        indices to the new indices in the subgraph
-        """
-        node_subset = torch.unique(node_index, sorted=True)
-        full2sub = {node.item(): idx for idx, node in enumerate(node_subset)}
-        subgraph = data.subgraph(node_subset)
-
-        return subgraph, full2sub
-
-
-    def preprocess_supervised(self):
-        """
-        Prepare the dataset with the alignments to use for training and testing.
-        """
-
-        if self.train_dict is not None:
-            # Load groundtruth alignmnets
-            train_gt = load_gt(self.train_dict, self.source_dataset.id2idx, self.target_dataset.id2idx, 'dict')
-            test_gt = load_gt(self.groundtruth, self.source_dataset.id2idx, self.target_dataset.id2idx, 'dict')
-            full_gt = {}
-            full_gt.update(train_gt)
-            full_gt.update(test_gt)
-
-            # Convert names to indices
-            train_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in train_gt.items()}
-            test_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in test_gt.items()}
-            full_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k, v in full_gt.items()}
-
-            # Trasform to `edge_index` of shape (2, N)
-            train_index = torch.tensor([list(train_dict.keys()), list(train_dict.values())]).to(self.device)
-            test_index = torch.tensor([list(test_dict.keys()), list(test_dict.values())]).to(self.device)
-            full_index = torch.tensor([list(full_dict.keys()), list(full_dict.values())]).to(self.device)
-
-            self.train_gt = train_gt
-            self.test_gt = test_gt
-            self.full_gt = full_gt
-            self.train_dict = train_dict
-            self.test_dict = test_dict
-            self.full_dict = full_dict
-            self.train_index = train_index
-            self.test_index = test_index
-            self.full_index = full_index
-
-    
-    def init_supervised_models(self):
-        self.crosser = get_mapping_model(
-            'cross_attention',
-            k=self.embedding_dim,
-            heads=8
-        ).to(self.device)
-
-
-
-    def learn_mapping(self):
-        """
-        Learn the mapping between source and target embeddings.
-        """
-        # Generate the embeddings for source and target networks
-        self.embedder.eval()
-        with torch.no_grad():
-            source_embeddings = self.embedder(self.data_s.x, self.data_s.edge_index).unsqueeze(0)
-            target_embeddings = self.embedder(self.data_t.x, self.data_t.edge_index).unsqueeze(0)
-            print(f"source_emeddings: {source_embeddings.shape}")
-            print(f"target_embeddings: {target_embeddings.shape}")
-        
-        # Train loop
-        for epoch in tqdm(range(self.epochs), desc="Mapping training:"):
-            self.crosser.train()
-            self.mapper.train()
-            train_loss = 0.0
-            train_examples = 0
-            self.mapping_optimizer.zero_grad()
-
-            # Sample negative alignments
-            pos_train_aligns = self.train_index
-            num_pos_train_aligns = pos_train_aligns.shape[1]
-  
-            neg_train_aligns = negative_sampling(
-                pos_train_aligns,
-                num_nodes=(
-                    torch.unique(self.train_index[0]).shape[0],
-                    torch.unique(self.train_index[1]).shape[0]),
-                num_neg_samples=num_pos_train_aligns * 2,   # Neg ratio of 2
-                force_undirected=True
-            )      
-            num_neg_train_aligns = neg_train_aligns.shape[1]
-
-            # Generate labels (1: positive align, 0: negative align)
-            train_aligns = torch.cat((pos_train_aligns, neg_train_aligns), dim=1)
-            train_labels = torch.cat((torch.ones(num_pos_train_aligns),
-                                      torch.zeros(num_neg_train_aligns)),
-                                      dim=0)
-            num_train_aligns = train_aligns.shape[1]
-
-            # Shuffle alignment indices and labels
-            permutation = torch.randperm(num_train_aligns)
-            train_aligns = train_aligns[:, permutation].to(self.device)
-            train_labels = train_labels[permutation].to(self.device)
-            
-            # Apply transformer with cross attention module
-            y_source2target, y_target2source = self.crosser(source_embeddings, target_embeddings)
-
-            # Get the crossed embeddings corresponding to the nodes in `train_aligns`
-            y_source2target = y_source2target[:, train_aligns[0]].squeeze(0)
-            y_target2source = y_target2source[:, train_aligns[1]].squeeze(0)
-
-            # Compute cosine similarity
-            pred_aligns = self.mapper.pred(y_source2target, y_target2source)
-
-            # Backward step
-            loss = self.mapping_criterion(pred_aligns, train_labels)
-            loss.backward()
-            self.mapping_optimizer.step()
-
-            train_loss += float(loss) * pred_aligns.numel()
-            train_examples += pred_aligns.numel()
-            train_loss /= train_examples
-
-        print(f"\ttrain loss: {train_loss}")
 
 
     def predict_alignments(self):

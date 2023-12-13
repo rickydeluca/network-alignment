@@ -84,20 +84,22 @@ def read_network_dataset(dataset, pos_info=False):
     return data
 
 
-def get_mapping_model(model, input_dim=0, dropout=0.5):
-    if model == 'cosine_similarity':
-        predictor = CosineSimilarity()
-    elif model == 'inner_product':
-        predictor = InnerProduct()
-    elif model == 'dnn':
-        predictor = LinkPredictor(input_dim=input_dim, dropout=dropout)
+def get_mapping_model(model_name, input_dim=0, dropout=0.5, k=None, heads=1):
+    if model_name == 'cosine_similarity':
+        model = CosineSimilarity()
+    elif model_name == 'inner_product':
+        model = InnerProduct()
+    elif model_name == 'dnn':
+        model = LinkPredictor(input_dim=input_dim, dropout=dropout)
+    elif model_name == 'cross_attention':
+        model = TransformerBlock(k=k, heads=heads)
     else:
-        raise ValueError(f"{model} is an invalid model name. Choose from: 'cosine_similarity', 'inner_product', 'dnn'")
+        raise ValueError(f"{model_name} is an invalid model name. Choose from: 'cosine_similarity', 'inner_product', 'dnn'")
 
-    return predictor
+    return model
 
 
-def get_embedding_model(model, in_channels=None, hidden_channels=None, out_channels=None, num_layers=None, heads=8, concat=False, dropout=0.0):
+def get_embedding_model(model, in_channels=None, hidden_channels=None, out_channels=None, num_layers=None, dropout=0.0):
 
     if model == 'sage':
         embedder = GraphSAGE(
@@ -113,14 +115,6 @@ def get_embedding_model(model, in_channels=None, hidden_channels=None, out_chann
             hidden_channels=hidden_channels,
             out_channels=out_channels,
             num_hidden_layers=num_layers-1
-        )
-    elif model == 'cross_transform':
-        embedder = CrossTransformerConv(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            dropout=dropout,
-            heads=heads,
-            concat=concat
         )
     else:
         raise ValueError(f"{model} is an invalid model name. Choose from: 'sage' and 'spectral'.")

@@ -1,5 +1,5 @@
 PD=dataspace/ppi
-PREFIX=REGAL-d1-seed1
+PREFIX=REGAL-d0-seed1
 TRAINRATIO=0.8
 
 # SANE
@@ -9,5 +9,7 @@ python network_alignment.py \
 --groundtruth ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.test.dict \
 SANE \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---embedding_model spectral \
+--embedding_model sage \
 --device cuda \
+--batch_size 4096 \
+--early_stop

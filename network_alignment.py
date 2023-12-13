@@ -130,7 +130,8 @@ def parse_args():
     parser_SANE.add_argument('--embedding_dim', type=int, default=1024, help="Size for the learned embeddings (default: 1024).")
     parser_SANE.add_argument('--num_layers', type=int, default=1, help="Num layers for the embedding model (default: 1).")
     parser_SANE.add_argument('--hidden_sizes', nargs='+', default=[], help="List with the sizez for the embeddin model hidden channels (default: []).")
-    
+    parser_SANE.add_argument('--hidden_channels', type=int, default=64, help="Hidden channels (default: 64).")
+
     parser_SANE.add_argument('--epochs', type=int, default=100)
     parser_SANE.add_argument('--lr', type=float, default=0.0003)
     parser_SANE.add_argument('--early_stop', action="store_true", default=False, help="Train with early stopping (default: False)")

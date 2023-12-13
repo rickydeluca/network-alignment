@@ -93,11 +93,3 @@ class GraphSAGEModel(nn.Module):
         x2 = self.conv(x2, edge_index2)
 
         return x1, x2
-
-
-class CrossTransformerConv(MessagePassing):
-    def __init__():
-        return
-    
-    def forward():
-        return
