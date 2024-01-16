@@ -9,10 +9,7 @@ python network_alignment.py \
 --groundtruth ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.test.dict \
 SANE \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---embedding_model sage \
---mapping_model inner_product \
---device cuda \
---epochs 100 \
---lr 0.00005 \
---num_layers 1 \
---early_stop \
+--device cpu \
+--embedding_model spectral \
+--batch_size_emb 4096 \
+--early_stop_emb \

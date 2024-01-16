@@ -1,100 +1,90 @@
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from algorithms.SANE.loss import MappingLossFunctions
 
-# =======
-#   DNN
-# =======
-class DNNModule(nn.Module):
-    def __init__(self, input_dim, dropout=0.5):
-        super(DNNModule, self).__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+class PaleMapping(nn.Module):
+    def __init__(self, source_embedding, target_embedding):
+        """
+        Parameters
+        ----------
+        source_embedding: torch.Tensor or Embedding_model
+            Used to get embedding vectors for nodes
+        target_embedding: torch.Tensor or Embedding_model
+            Used to get embedding vectors for target_nodes
+        target_neighbor: dict
+            dict of target_node -> target_nodes_neighbors. Used for calculate vinh_loss
+        """
 
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-
-            nn.Linear(64, 32),
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-        )
-
-    def forward(self, x):
-        return self.layers(x)
-    
-class LinkPredictor(nn.Module):
-    def __init__(self, input_dim, dropout=0.5):
-        super(LinkPredictor, self).__init__()
-        self.dnn1 = DNNModule(input_dim, dropout=dropout)
-        self.dnn2 = DNNModule(input_dim, dropout=dropout)
-
-        self.joint_module = nn.Sequential(
-            nn.Linear(32 * 2, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, 1),
-        )
-
-    def pred(self, x_i, x_j):
-        x_i = self.dnn1(x_i)
-        x_j = self.dnn2(x_j)
-        x_out = torch.cat([x_i, x_j], dim=1)
-        x_out = self.joint_module(x_out)
-        return x_out.squeeze(1)
-
-    def forward(self, x_i, x_j):
-        x_out = self.pred(x_i, x_j)
-        return F.softmax(x_out, dim=0)
+        super(PaleMapping, self).__init__()
+        self.source_embedding = source_embedding
+        self.target_embedding = target_embedding
+        self.loss_fn = MappingLossFunctions()
     
 
-# =====================
-#   COSINE SIMILARITY
-# =====================
-class CosineSimilarity(nn.Module):
-    """
-    Wrapper class for the pytorch `CosineSimilarity` class.
-    """
-    def __init__(self):
-        super(CosineSimilarity, self).__init__()
-        self.cosine_similarity = nn.CosineSimilarity(dim=1, eps=1e-8)
-    
-    def pred(self, x_i, x_j):
-        return self.cosine_similarity(x_i, x_j)
-    
-    
-# =================
-#   INNER PRODUCT
-# =================
-class InnerProduct(nn.Module):
-    """
-    Wrapper class to compute the inner product.
-    """
-    def __init__(self):
-        super(InnerProduct, self).__init__()
+class PaleMappingLinear(PaleMapping):
+    def __init__(self, embedding_dim, source_embedding, target_embedding):
+        super(PaleMappingLinear, self).__init__(source_embedding, target_embedding)
+        self.maps = nn.Linear(embedding_dim, embedding_dim, bias=True)
+
+    def loss(self, source_indices, target_indices):
+        source_feats = self.source_embedding[source_indices]
+        target_feats = self.target_embedding[target_indices]
+
+        source_feats_after_mapping = self.forward(source_feats)
+
+        batch_size = source_feats.shape[0]
+        mapping_loss = self.loss_fn.loss(source_feats_after_mapping, target_feats) / batch_size
         
-    def pred(self, x_i, x_j):
-        x_i_norm = F.normalize(x_i, p=2, dim=-1)
-        x_j_norm = F.normalize(x_j, p=2, dim=-1)
-        return (x_i_norm * x_j_norm).sum(dim=-1)
+        return mapping_loss
 
-# ===================
-#   CROSS ATTENTION
-# ===================
+    def forward(self, source_feats):
+        ret = self.maps(source_feats)
+        ret = F.normalize(ret, dim=1)
+        return ret
+
+
+class PaleMappingMlp(PaleMapping):
+    def __init__(self, embedding_dim, source_embedding, target_embedding, activate_function='sigmoid'):
+
+        super(PaleMappingMlp, self).__init__(source_embedding, target_embedding)
+
+        if activate_function == 'sigmoid':
+            self.activate_function = nn.Sigmoid()
+        elif activate_function == 'relu':
+            self.activate_function = nn.ReLU()
+        else:
+            self.activate_function = nn.Tanh()
+
+        hidden_dim = 2*embedding_dim
+        self.mlp = nn.Sequential(*[
+            nn.Linear(embedding_dim, hidden_dim, bias=True),
+            self.activate_function,
+            nn.Linear(hidden_dim, embedding_dim, bias=True)
+        ])
+
+
+    def loss(self, source_indices, target_indices):
+        source_feats = self.source_embedding[source_indices]
+        target_feats = self.target_embedding[target_indices]
+
+        source_feats_after_mapping = self.forward(source_feats)
+
+        batch_size = source_feats.shape[0]
+        mapping_loss = self.loss_fn.loss(source_feats_after_mapping, target_feats) / batch_size
+        
+
+        return mapping_loss
+
+    def forward(self, source_feats):
+        ret = self.mlp(source_feats)
+        ret = F.normalize(ret, dim=1)
+        return ret
+
 
 class CrossAttention(nn.Module):
     def __init__(self, m, heads=8):
@@ -145,27 +135,54 @@ class CrossAttention(nn.Module):
         return y_x1_x2, y_x2_x1
 
 
-class TransformerBlock(nn.Module):
-    def __init__(self, k, heads):
-        super(TransformerBlock, self).__init__()
+class PaleMappingCrossTransformer(PaleMapping):
+    def __init__(self, source_embedding, target_embedding, k=None, heads=1, activate_function='sigmoid',):
+        super(PaleMappingCrossTransformer, self).__init__(source_embedding, target_embedding)
+
+        if activate_function == 'sigmoid':
+            self.activate_function = nn.Sigmoid()
+        elif activate_function == 'relu':
+            self.activate_function = nn.ReLU()
+        else:
+            self.activate_function = nn.Tanh()
 
         self.cross_attention = CrossAttention(k, heads=heads)
 
-        self.norm1 = nn.LayerNorm(k)
-        self.norm2 = nn.LayerNorm(k)
+        self.norm1 = nn.BatchNorm1d(k)
+        self.norm2 = nn.BatchNorm1d(k)
 
+        hidden_dim = 4*k
         self.ff = nn.Sequential(
-            nn.Linear(k, 4 * k),
-            nn.ReLU(),
-            nn.Linear(4 * k, k)
+            nn.Linear(k, hidden_dim, bias=True),
+            self.activate_function,
+            nn.Linear(hidden_dim, k, bias=True)
         )
 
+    def loss(self, source_indices, target_indices):
+        source_feats = self.source_embedding[source_indices]
+        target_feats = self.target_embedding[target_indices]
+
+        source_feats_after_mapping, target_feats_after_mapping = self.forward(source_feats, target_feats)
+        
+        batch_size = source_feats.shape[0]
+        mapping_loss = self.loss_fn.loss(source_feats_after_mapping, target_feats_after_mapping) / batch_size
+
+        return mapping_loss
+    
     def forward(self, x1, x2):
+        x1 = x1.unsqueeze(0)
+        x2 = x2.unsqueeze(0)
         attended_x1_x2, attended_x2_x1 = self.cross_attention(x1, x2)
-        x1 = self.norm1(attended_x1_x2 + x1)
-        x2 = self.norm1(attended_x2_x1 + x2)
+        x1 = self.norm1(attended_x1_x2 + x1).squeeze(0)
+        x2 = self.norm1(attended_x2_x1 + x2).squeeze(0)
 
         fedforward_x1 = self.ff(x1)
         fedforward_x2 = self.ff(x2)
 
-        return self.norm2(fedforward_x1 + x1), self.norm2(fedforward_x2 + x2)
+        x1 = self.norm2(fedforward_x1 + x1)
+        x2 = self.norm2(fedforward_x2 + x2)
+
+        x1 = F.normalize(x1, dim=1)
+        x2 = F.normalize(x2, dim=1)
+        return x1, x2
+

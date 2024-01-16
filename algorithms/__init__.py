@@ -8,6 +8,7 @@ from algorithms.PALE import PALE
 from algorithms.HDA import HDA
 from algorithms.MAGNA import MAGNA
 from algorithms.SANE import SANE
+from algorithms.COMMON import COMMON
 
-__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE', 'HDA', 'MAGNA', 'SANE']
+__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE', 'HDA', 'MAGNA', 'SANE', 'COMMON']
 

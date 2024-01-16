@@ -94,7 +94,7 @@ class SANE(NetworkAlignmentModel):
     
     def supervised_learning(self):
         self.preprocess_supervised()
-        self.init_supervised_models()
+        self.init_mapping_model()
         self.mapping_optimizer = torch.optim.Adam(self.crosser.parameters(), lr = self.lr)
         self.mapping_criterion = torch.nn.BCEWithLogitsLoss()
         self.learn_mapping()

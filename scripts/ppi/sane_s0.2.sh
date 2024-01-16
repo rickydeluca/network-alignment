@@ -1,6 +1,6 @@
 PD=dataspace/ppi
-PREFIX=REGAL-d0-seed1
-TRAINRATIO=0.8
+PREFIX=REGAL-d2-seed1
+TRAINRATIO=0.2
 
 # SANE
 python network_alignment.py \
@@ -11,5 +11,5 @@ SANE \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
 --embedding_model sage \
 --device cuda \
---batch_size 4096 \
---early_stop
+--batch_size_emb 4096 \
+--early_stop_emb

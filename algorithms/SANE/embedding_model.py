@@ -1,19 +1,58 @@
-import math
-from typing import Optional, Tuple, Union
-import torch
-import torch.nn.functional as F
-from torch import Tensor
-from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.nn.dense.linear import Linear
-from torch_geometric.typing import Adj, OptTensor, PairTensor, SparseTensor
-from torch_geometric.utils import softmax
-from torch_geometric.data import Data
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, GraphSAGE
 
-from torch_geometric.nn import GCNConv, GraphSAGE, MessagePassing
+from algorithms.SANE.loss import EmbeddingLossFunctions
 
-class SpectralGCN(nn.Module):
+class SaneEmbedding(nn.Module):
+    def __init__(self, source_data, target_data, neg_sample_ratio=2.0):
+
+        """
+        Args:
+        - n_nodes (int):            Number of all nodes
+        - embedding_dim (int):      Node embedding size
+        - neg_sample_size (int):    Number of negative candidate to sample
+        """
+
+        super(SaneEmbedding, self).__init__()
+        self.source_data = source_data
+        self.target_data = target_data
+        self.neg_sample_ratio = neg_sample_ratio
+        self.loss_fn = EmbeddingLossFunctions()
+
+class SaneEmbeddingGCN(SaneEmbedding):
+    """
+    Class to handle a spectral-based graph convolutional network.
+    It takes in input two graphs expressed in pytorch geometric data format
+    with the corresponding node feature matrices and perform a convolutional
+    operation on both networks.
+    """
+    def __init__(self, source_data, target_data, neg_sampling_ratio=2, in_channels=64, hidden_channels=64, out_channels=64, num_hidden_layers=0):
+        
+        super(SaneEmbeddingGCN).__init__(source_data, target_data, neg_sample_ratio=neg_sampling_ratio)
+        
+        if isinstance(in_channels, int):
+            in_channels = (in_channels)
+
+        assert(len(in_channels) == num_hidden_layers)
+        
+        if num_hidden_layers == 0:
+            self.convs = nn.ModuleList([GCNConv(in_channels, out_channels)])
+        elif num_hidden_layers >= 1:
+            self.convs = nn.ModuleList([GCNConv(in_channels, hidden_channels[0])])
+            for i in range(1, num_hidden_layers):
+                self.convs.append(GCNConv(hidden_channels[i-1], hidden_channels[i]))
+            self.convs.append(GCNConv(hidden_channels[num_hidden_layers-1], out_channels))
+        else:
+            raise ValueError("The number of hidden layers must be greater or equal 0.")
+
+
+    def loss(self, source_indices, target_indices):
+        pass
+        
+    
+
+class GCNEmbeddingModel():
     """
     Class to handle a spectral-based graph convolutional network.
     It takes in input two graphs expressed in pytorch geometric data format
@@ -56,9 +95,8 @@ class SpectralGCN(nn.Module):
             x2 = F.relu(x2)
 
         return x1, x2
-
-
-class GraphSAGEModel(nn.Module):
+    
+class SaneEmbeddingSAGE(nn.Module):
     """
     Class to handle an embedding model based on GraphSAGE.
     It takes in input two graphs expressed in pytorch geometric data format
@@ -73,6 +111,10 @@ class GraphSAGEModel(nn.Module):
                               out_channels=out_channels,
                               num_layers=num_layers,
                               dropout=dropout)
+        
+    def loss(self, source_indices, target_indices):
+        pass
+
         
     def forward(self, source_data, target_data):
         edge_index1 = source_data.edge_index

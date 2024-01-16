@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument('--transpose_alignment_matrix', action="store_true", default=False, help="Transpose the alignment matrix.")
     parser.add_argument('--seed',           default=123,    type=int)
 
-    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA, MAGNA, SANE')
+    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA, MAGNA, SANE, COMMON')
 
     parser_IsoRank = subparsers.add_parser('IsoRank', help='IsoRank algorithm')
     parser_IsoRank.add_argument('--H',                   default=None, help="Priority matrix")
@@ -123,24 +123,38 @@ def parse_args():
     
     parser_SANE = subparsers.add_parser('SANE', help='SANE algorithm')
     parser_SANE.add_argument('--train_dict', type=str, default="dataspace/douban/dictionaries/node,split=0.2.train.dict", help="Path to the alignment dictionary for training.")
-    parser_SANE.add_argument('--embedding_model', type=str, default="sage", help="Model for prediction (default: 'sage').")
-    parser_SANE.add_argument('--mapping_model', type=str, default="dnn", help="Model for alignment mapping (default: 'dnn').")
     parser_SANE.add_argument('--device', type=str, default="cpu", help="Device to use for training (default: cpu)")
     
+    # Unsupervised learning parameters
+    parser_SANE.add_argument('--embedding_model', type=str, default='sage', help="Model used to learn embeddings (default: sage).")
     parser_SANE.add_argument('--embedding_dim', type=int, default=1024, help="Size for the learned embeddings (default: 1024).")
     parser_SANE.add_argument('--num_layers', type=int, default=1, help="Num layers for the embedding model (default: 1).")
-    parser_SANE.add_argument('--hidden_sizes', nargs='+', default=[], help="List with the sizez for the embeddin model hidden channels (default: []).")
-    parser_SANE.add_argument('--hidden_channels', type=int, default=64, help="Hidden channels (default: 64).")
-
-    parser_SANE.add_argument('--epochs', type=int, default=100)
-    parser_SANE.add_argument('--lr', type=float, default=0.0003)
-    parser_SANE.add_argument('--early_stop', action="store_true", default=False, help="Train with early stopping (default: False)")
-    parser_SANE.add_argument('--patience', type=int, default=10, help="Number of epochs to wait for improvement if using `early_stop` (default: 10)")
-    parser_SANE.add_argument('--batch_size', type=int, default=256, help="Batch size (default: 256).")
-    parser_SANE.add_argument('--embedding_dropout', type=float, default=0.2, help="Dropout probability for embedding model (default: 0.2).")
-    parser_SANE.add_argument('--mapping_dropout', type=float, default=0.5, help="Dropout probability for mapping model (default: 0.5).")
+    parser_SANE.add_argument('--hidden_channels', type=int, default=64, help="Size of hidden layers for embedding model (default: 64).")
+    parser_SANE.add_argument('--dropout_emb', type=float, default=0.2, help="Dropout probability of the embedding model (default: 0.2).")
+    parser_SANE.add_argument('--pos_info', action='store_true', default=True, help="If True concatenate the node features with the (weighted) adjacency matrix (default: True).")
     
+    parser_SANE.add_argument('--prediction_model', type=str, default='inner_product', help="Model to use to perform link prediction during unsupervised learning (it can have learnable parameters) (default: inner_product).")
+    parser_SANE.add_argument('--dropout_pred', type=float, default=0.5, help="Dropout probability of prediction model, used only if required (default: 64).")
+    
+    parser_SANE.add_argument('--batch_size_emb', type=int, default=256, help="Batch size for unsupervised learning (default: 256).")
+    parser_SANE.add_argument('--epochs_emb', type=int, default=100, help="Number of epoch of unsupervised learning (default: 100).")
+    parser_SANE.add_argument('--lr_emb', type=float, default=0.0003, help="Learning rate for unsupervised learning (default: 0.0003).")
+    parser_SANE.add_argument('--early_stop_emb', action="store_true", default=False, help="Unsupervised training with early stopping (default: False)")
+    parser_SANE.add_argument('--patience_emb', type=int, default=10, help="Number of epochs to wait for improvement if using `early_stop_emb` (default: 10)")
 
+    # Supervised learning parmeters
+    parser_SANE.add_argument('--mapping_model', type=str, default='linear', help="Model used to learn mapping (default: linear).")
+    parser_SANE.add_argument('--heads', type=int, default=1, help="Number of heads for cross attention. Used only if 'cross_transformer' was chosen as `mapping_model (deafult: 1).")
+
+    parser_SANE.add_argument('--batch_size_map', type=int, default=256, help="Batch size for supervised learning (default: 256).")
+    parser_SANE.add_argument('--epochs_map', type=int, default=100, help="Number of epoch of supervised learning (default: 100).")
+    parser_SANE.add_argument('--lr_map', type=float, default=0.01, help="Learning rate for supervised learning (default: 0.01).")
+    parser_SANE.add_argument('--early_stop_map', action="store_true", default=False, help="Supervised training with early stopping (default: False)")
+    parser_SANE.add_argument('--patience_map', type=int, default=10, help="Number of epochs to wait for improvement if using `early_stop_map` (default: 10)")
+
+    # COMMON
+    parser_COMMON = subparsers.add_parser('COMMON', help='COMMON algorithm')
+    parser_COMMON.add_argument('--backbone', type='str', default='')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -176,6 +190,8 @@ if __name__ == '__main__':
         model = MAGNA(source_dataset, target_dataset, source_edgelist=args.source_edgelist, target_edgelist=args.target_edgelist, measure=args.measure, population_size=args.population_size, num_generations=args.num_generations, num_threads=args.num_threads, outfile=args.outfile, reverse=args.reverse)
     elif algorithm == "SANE":
         model = SANE(source_dataset, target_dataset, args)
+    elif algorithm == "COMMON":
+        model = COMMON(source_dataset, target_dataset, args)
     else:
         raise Exception("Unsupported algorithm")
 

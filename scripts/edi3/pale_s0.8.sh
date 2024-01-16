@@ -1,5 +1,5 @@
 PD=dataspace/edi3
-PREFIX=REGAL-d05-seed1
+PREFIX=REGAL-d2-seed1
 TRAINRATIO=0.8
 
 python network_alignment.py \
@@ -8,4 +8,4 @@ python network_alignment.py \
 --groundtruth ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.test.dict \
 PALE \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---cuda 
+# --cuda 
