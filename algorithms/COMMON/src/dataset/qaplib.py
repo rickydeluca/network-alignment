@@ -1,7 +1,7 @@
 import numpy as np
-from src.utils.config import cfg
+from algorithms.COMMON.src.utils.config import cfg
 from pathlib import Path
-from src.dataset.base_dataset import BaseDataset
+from algorithms.COMMON.src.dataset.base_dataset import BaseDataset
 import re
 import urllib
 

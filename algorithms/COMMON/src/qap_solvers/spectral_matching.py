@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from src.utils.sparse import sbmm
+from algorithms.COMMON.src.utils.sparse import sbmm
 
 
 class SpectralMatching(nn.Module):

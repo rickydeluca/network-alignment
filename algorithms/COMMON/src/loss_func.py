@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.lap_solvers.hungarian import hungarian
-from src.lap_solvers.ILP import ILP_solver
+from algorithms.COMMON.src.lap_solvers.hungarian import hungarian
+from algorithms.COMMON.src.lap_solvers.ILP import ILP_solver
 from torch import Tensor
 
 

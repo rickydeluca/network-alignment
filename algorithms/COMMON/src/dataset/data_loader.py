@@ -5,12 +5,12 @@ from torchvision import transforms
 import torch_geometric as pyg
 import numpy as np
 import random
-from src.build_graphs import build_graphs
-from src.factorize_graph_matching import kronecker_sparse, kronecker_torch
-from src.sparse_torch import CSRMatrix3d, CSCMatrix3d
-from src.dataset import *
 
-from src.utils.config import cfg
+from algorithms.COMMON.src.build_graphs import build_graphs
+from algorithms.COMMON.src.factorize_graph_matching import kronecker_sparse, kronecker_torch
+from algorithms.COMMON.src.sparse_torch import CSRMatrix3d, CSCMatrix3d
+from algorithms.COMMON.src.dataset import *
+from algorithms.COMMON.src.utils.config import cfg
 
 from itertools import combinations, product
 

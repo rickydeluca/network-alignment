@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from itertools import combinations
-from src.utils.config import cfg
+from algorithms.COMMON.src.utils.config import cfg
 
 
 def pck(x: Tensor, x_gt: Tensor, perm_mat: Tensor, dist_threshs: Tensor, ns: Tensor) -> Tensor:

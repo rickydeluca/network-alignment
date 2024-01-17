@@ -11,7 +11,7 @@ import os
 from easydict import EasyDict as edict
 import numpy as np
 import importlib
-import src.dataset
+import algorithms.COMMON.src.dataset
 
 __C = edict()
 # Consumers can get config by:

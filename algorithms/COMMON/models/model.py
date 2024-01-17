@@ -2,18 +2,15 @@ import torch
 import itertools
 import numpy as np
 
-from models.sconv_archs import SiameseSConvOnNodes, SiameseNodeFeaturesToEdgeFeatures
-from src.feature_align import feature_align
-from src.factorize_graph_matching import construct_aff_mat
-from src.utils.pad_tensor import pad_tensor
-from src.lap_solvers.sinkhorn import Sinkhorn
-from src.lap_solvers.hungarian import hungarian
-
-from src.utils.config import cfg
-
-from src.backbone import *
-
-from src.loss_func import *
+from algorithms.COMMON.models.sconv_archs import SiameseSConvOnNodes, SiameseNodeFeaturesToEdgeFeatures
+from algorithms.COMMON.src.feature_align import feature_align
+from algorithms.COMMON.src.factorize_graph_matching import construct_aff_mat
+from algorithms.COMMON.src.utils.pad_tensor import pad_tensor
+from algorithms.COMMON.src.lap_solvers.sinkhorn import Sinkhorn
+from algorithms.COMMON.src.lap_solvers.hungarian import hungarian
+from algorithms.COMMON.src.utils.config import cfg
+from algorithms.COMMON.src.backbone import *
+from algorithms.COMMON.src.loss_func import *
 
 CNN = eval(cfg.BACKBONE)
 
@@ -22,9 +19,9 @@ def lexico_iter(lex):
     return itertools.combinations(lex, 2)
 
 
-# def normalize_over_channels(x):
-#     channel_norms = torch.norm(x, dim=1, keepdim=True)
-#     return x / channel_norms
+def normalize_over_channels(x):
+    channel_norms = torch.norm(x, dim=1, keepdim=True)
+    return x / channel_norms
 
 
 def concat_features(embeddings, num_vertices):
@@ -48,7 +45,8 @@ class InnerProduct(nn.Module):
         return [self._forward(X, Y) for X, Y in zip(Xs, Ys)]
 
 
-class Backbone(CNN):
+# class Backbone(CNN):
+class Backbone(nn.Module):
     def __init__(self):
         super(Backbone, self).__init__()
         self.message_pass_node_features = SiameseSConvOnNodes(input_node_dim=cfg.COMMON.FEATURE_CHANNEL * 2)
@@ -72,37 +70,31 @@ class Backbone(CNN):
         with torch.no_grad():
             self.logit_scale.clamp_(0, 4.6052)  # Clamp temperature to be between 0.01 and 1
 
-        images = data_dict['images']
-        points = data_dict['Ps']
-        n_points = data_dict['ns']
-        graphs = data_dict['pyg_graphs']
-        batch_size = data_dict['batch_size']
-        num_graphs = len(images)
+        # images = data_dict['images']            # Not needed, we pass directly graphs
+        # points = data_dict['Ps']        
+        n_points = data_dict['ns']              # Numebr of nodes in each graph
+        graphs = data_dict['pyg_graphs']        # The single graphs 
+        batch_size = data_dict['batch_size']    # The number of image pairs, in our case the graph pairs
+        # num_graphs = len(images)                # The total number of images (graphs)
+        num_graphs = len(graphs)   
         orig_graph_list = []
 
-        for image, p, n_p, graph in zip(images, points, n_points, graphs):
-            # Extract node and edge features from one image
-            nodes = self.node_layers(image)
-            edges = self.edge_layers(nodes)
+        # for image, p, n_p, graph in zip(images, points, n_points, graphs):
+        #     nodes = self.node_layers(image)
+        #     edges = self.edge_layers(nodes)
 
-            # Normalize the computed node and edge features
-            nodes = normalize_over_channels(nodes)
-            edges = normalize_over_channels(edges)
+        #     nodes = normalize_over_channels(nodes)
+        #     edges = normalize_over_channels(edges)
 
-            # Perform some operation to align the features and concatenate
-            # node and edge features in a singe entity called 'node_features'.
-            # Now, each node feature encapsulates also the corresponding 
-            # edge features (probably).
-            U = feature_align(nodes, p, n_p, self.rescale)
-            F = feature_align(edges, p, n_p, self.rescale)
-            U = concat_features(U, n_p)
-            F = concat_features(F, n_p)
-            node_features = torch.cat((U, F), dim=1)
+        #     U = feature_align(nodes, p, n_p, self.rescale)
+        #     F = feature_align(edges, p, n_p, self.rescale)
+        #     U = concat_features(U, n_p)
+        #     F = concat_features(F, n_p)
+        #     node_features = torch.cat((U, F), dim=1)
 
-            # GNN:
-            # Finally the Graph-convolutional network is applied on the
-            # pytorch geometric graph using the node feature preaviously computed.
-            graph.x = node_features
+        for graph in graphs:
+            # GNN
+            # graph.x = node_features             # In theory, when we pass our pyg graph it should already contains the node features.
             graph = self.message_pass_node_features(graph)
             orig_graph = self.build_edge_features_from_node_features(graph)
             orig_graph_list.append(orig_graph)
@@ -116,10 +108,13 @@ class Backbone(CNN):
         keypoint_number_list = []   # The number of keypoints in each image pair
         node_feature_list = []      # Node features for computing contrastive loss
 
-        node_feature_graph1 = torch.zeros([batch_size, data_dict['gt_perm_mat'].shape[1], node_features.shape[1]],
-                                          device=node_features.device)
-        node_feature_graph2 = torch.zeros([batch_size, data_dict['gt_perm_mat'].shape[2], node_features.shape[1]],
-                                          device=node_features.device)
+        feature_dim = next(iter(graphs)).x
+        device = next(iter(graphs)).x.device
+
+        node_feature_graph1 = torch.zeros([batch_size, data_dict['gt_perm_mat'].shape[1], feature_dim],
+                                          device=device)
+        node_feature_graph2 = torch.zeros([batch_size, data_dict['gt_perm_mat'].shape[2], feature_dim],
+                                          device=device)
         
         # Count the available keypoints in number list
         for index in range(batch_size):
@@ -128,10 +123,10 @@ class Backbone(CNN):
             keypoint_number_list.append(torch.sum(data_dict['gt_perm_mat'][index]))
         number = int(sum(keypoint_number_list))  # calculate the number of correspondence
 
-        # pre-align the keypoints for further computing the contrastive loss
+        # Pre-align the keypoints for further computing the contrastive loss
         node_feature_graph2 = torch.bmm(data_dict['gt_perm_mat'], node_feature_graph2)
-        final_node_feature_graph1 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
-        final_node_feature_graph2 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
+        final_node_feature_graph1 = torch.zeros([number, feature_dim], device=device)
+        final_node_feature_graph2 = torch.zeros([number, feature_dim], device=device)
         count = 0
         for index in range(batch_size):
             final_node_feature_graph1[count: count + int(keypoint_number_list[index])] \
@@ -143,14 +138,15 @@ class Backbone(CNN):
         node_feature_list.append(self.projection(final_node_feature_graph2))
 
         if online == False:
-            # output of the momentum network
+            # Output of the momentum network
             return node_feature_list
+        
         elif online == True:
-            # output of the online network
+            # Output of the online network
             x_list = []
             for unary_affs, (idx1, idx2) in zip(unary_affs_list, lexico_iter(range(num_graphs))):
                 Kp = torch.stack(pad_tensor(unary_affs), dim=0)
-                # conduct hungarian matching to get the permutation matrix for evaluation
+                # Conduct hungarian matching to get the permutation matrix for evaluation
                 x = hungarian(Kp, n_points[idx1], n_points[idx2])
                 x_list.append(x)
             return node_feature_list, x_list

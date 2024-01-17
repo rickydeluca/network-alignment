@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from src.lap_solvers.sinkhorn import Sinkhorn as Sinkhorn
+from algorithms.COMMON.src.lap_solvers.sinkhorn import Sinkhorn as Sinkhorn
 
 
 class RRWM(nn.Module):

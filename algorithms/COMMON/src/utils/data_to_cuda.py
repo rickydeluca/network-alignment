@@ -1,5 +1,5 @@
 import torch
-from src.sparse_torch.csx_matrix import CSRMatrix3d, CSCMatrix3d
+from algorithms.COMMON.src.sparse_torch.csx_matrix import CSRMatrix3d, CSCMatrix3d
 import torch_geometric as pyg
 
 def data_to_cuda(inputs):

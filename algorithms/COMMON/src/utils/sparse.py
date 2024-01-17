@@ -5,7 +5,7 @@ from torch.autograd import Function
 import numpy as np
 import scipy.sparse as ssp
 
-from src.sparse_torch import CSRMatrix3d, CSCMatrix3d
+from algorithms.COMMON.src.sparse_torch import CSRMatrix3d, CSCMatrix3d
 
 if 'SPHINX' not in os.environ:
     from torch.utils.cpp_extension import load

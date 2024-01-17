@@ -1,8 +1,8 @@
 import torch
 from torch import Tensor
 from torch.autograd import Function
-from src.utils.sparse import bilinear_diag_torch
-from src.sparse_torch import CSRMatrix3d, CSCMatrix3d
+from algorithms.COMMON.src.utils.sparse import bilinear_diag_torch
+from algorithms.COMMON.src.sparse_torch import CSRMatrix3d, CSCMatrix3d
 import scipy.sparse as ssp
 import numpy as np
 
