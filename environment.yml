@@ -8,14 +8,18 @@ channels:
 dependencies:
   - _libgcc_mutex=0.1=main
   - _openmp_mutex=5.1=1_gnu
+  - binutils=2.38=h1680402_1
+  - binutils_impl_linux-64=2.38=h2a08ee3_1
+  - binutils_linux-64=2.38.0=hc2dff05_0
   - blas=1.0=mkl
   - bottleneck=1.3.5=py311hbed6279_0
   - brotli=1.0.9=h166bdaf_7
   - brotli-bin=1.0.9=h166bdaf_7
   - brotlipy=0.7.0=py311h5eee18b_1002
   - bzip2=1.0.8=h7b6447c_0
-  - ca-certificates=2023.08.22=h06a4308_0
-  - certifi=2023.11.17=py311h06a4308_0
+  - c-compiler=1.5.2=h0b41bf4_0
+  - ca-certificates=2023.11.17=hbcca054_0
+  - certifi=2023.11.17=pyhd8ed1ab_0
   - cffi=1.15.1=py311h5eee18b_3
   - charset-normalizer=2.0.4=pyhd3eb1b0_0
   - contourpy=1.0.5=py311hdb19cb5_0
@@ -26,6 +30,7 @@ dependencies:
   - cuda-nvrtc=11.8.89=0
   - cuda-nvtx=11.8.86=0
   - cuda-runtime=11.8.0=0
+  - cxx-compiler=1.5.2=hf52228f_0
   - cycler=0.11.0=pyhd8ed1ab_0
   - dbus=1.13.18=hb2f20db_0
   - expat=2.2.10=h9c3ff4c_0
@@ -34,6 +39,9 @@ dependencies:
   - fontconfig=2.14.1=hef1e5e3_0
   - fonttools=4.25.0=pyhd3eb1b0_0
   - freetype=2.12.1=h4a9f257_0
+  - gcc=11.2.0=h702ea55_10
+  - gcc_impl_linux-64=11.2.0=h1234567_1
+  - gcc_linux-64=11.2.0=h5c386dc_0
   - gensim=4.3.0=py311hba01205_1
   - giflib=5.2.1=h5eee18b_3
   - glib=2.69.1=he621ea3_2
@@ -42,12 +50,16 @@ dependencies:
   - gnutls=3.6.15=he1e5248_0
   - gst-plugins-base=1.14.1=h6a678d5_1
   - gstreamer=1.14.1=h5eee18b_1
+  - gxx=11.2.0=h702ea55_10
+  - gxx_impl_linux-64=11.2.0=h1234567_1
+  - gxx_linux-64=11.2.0=hc2dff05_0
   - icu=58.2=hf484d3e_1000
   - idna=3.4=py311h06a4308_0
   - intel-openmp=2023.1.0=hdb19cb5_46305
   - jinja2=3.1.2=py311h06a4308_0
   - joblib=1.3.2=pyhd8ed1ab_0
   - jpeg=9e=h5eee18b_1
+  - kernel-headers_linux-64=2.6.32=he073ed8_16
   - kiwisolver=1.4.4=py311h6a678d5_0
   - krb5=1.20.1=h143b758_1
   - lame=3.100=h7b6447c_0
@@ -68,6 +80,7 @@ dependencies:
   - libedit=3.1.20221030=h5eee18b_0
   - libevent=2.1.12=hdbd6064_1
   - libffi=3.4.4=h6a678d5_0
+  - libgcc-devel_linux-64=11.2.0=h1234567_1
   - libgcc-ng=11.2.0=h1234567_1
   - libgfortran-ng=13.1.0=h69a702a_0
   - libgfortran5=13.1.0=h15d22d2_0
@@ -79,6 +92,7 @@ dependencies:
   - libnvjpeg=11.9.0.86=0
   - libpng=1.6.39=h5eee18b_0
   - libpq=12.15=hdbd6064_1
+  - libstdcxx-devel_linux-64=11.2.0=h1234567_1
   - libstdcxx-ng=11.2.0=h1234567_1
   - libtasn1=4.19.0=h5eee18b_0
   - libtiff=4.5.0=h6a678d5_2
@@ -105,6 +119,7 @@ dependencies:
   - ncurses=6.4=h6a678d5_0
   - nettle=3.7.3=hbbd107a_1
   - networkx=3.1=pyhd8ed1ab_0
+  - ninja=1.11.0=h924138e_0
   - nspr=4.35=h6a678d5_0
   - nss=3.89.1=h6a678d5_0
   - numexpr=2.8.4=py311h65dcdc2_1
@@ -146,6 +161,7 @@ dependencies:
   - smart_open=6.3.0=pyhd8ed1ab_1
   - sqlite=3.41.2=h5eee18b_0
   - sympy=1.11.1=py311h06a4308_0
+  - sysroot_linux-64=2.12=he073ed8_16
   - tbb=2021.8.0=hdb19cb5_0
   - threadpoolctl=3.2.0=pyha21a80b_0
   - tk=8.6.12=h1ccaba5_0
@@ -162,9 +178,4 @@ dependencies:
   - xz=5.4.2=h5eee18b_0
   - zlib=1.2.13=h5eee18b_0
   - zstd=1.5.5=hc292b87_0
-  - pip:
-      - pyg-lib==0.3.1+pt20cu118
-      - pyreadr==0.5.0
-      - torch-scatter==2.1.2
-      - torch-sparse==0.6.18
 prefix: /home/ricky/miniconda3/envs/netalign
