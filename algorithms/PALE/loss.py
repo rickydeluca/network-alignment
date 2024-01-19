@@ -1,7 +1,4 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
 
 class EmbeddingLossFunctions(object):
     def __init__(self, loss_fn='xent', neg_sample_weights=1.0):

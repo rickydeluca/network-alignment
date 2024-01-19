@@ -1,16 +1,13 @@
-from algorithms.network_alignment_model import NetworkAlignmentModel
-from algorithms.PALE.embedding_model import PaleEmbedding
-from algorithms.PALE.mapping_model import PaleMappingLinear, PaleMappingMlp, PaleMappingCrossTransformer
-from input.dataset import Dataset
-from utils.graph_utils import load_gt
-
-import torch
-import numpy as np
-
-import argparse
 import os
 import time
 
+import numpy as np
+import torch
+
+from algorithms.network_alignment_model import NetworkAlignmentModel
+from algorithms.PALE.embedding_model import PaleEmbedding
+from algorithms.PALE.mapping_model import PaleMappingLinear, PaleMappingMlp
+from utils.graph_utils import load_gt
 
 
 class PALE(NetworkAlignmentModel):
@@ -78,17 +75,6 @@ class PALE(NetworkAlignmentModel):
                                         source_embedding=self.source_embedding,
                                         target_embedding=self.target_embedding,
                                         )
-        if self.mapping_model == 'cross_transformer':
-            print("Use Cross Transform mapping")
-            mapping_model = PaleMappingCrossTransformer(
-                embedding_dim= self.embedding_dim,
-                source_embedding = self.source_embedding,
-                target_embedding = self.target_embedding,
-                activate_function=self.map_act,
-                num_attention_layers=2,
-                num_ff_layers=1,
-                heads=5
-            )
         else:
             print("Use Mpl mapping")
             mapping_model = PaleMappingMlp(
@@ -137,12 +123,8 @@ class PALE(NetworkAlignmentModel):
             # for time evaluate
             self.mapping_epoch_time = time.time() - start
 
-        if self.mapping_model == 'cross_transformer':
-            self.source_after_mapping, self.target_after_mapping = mapping_model(self.source_embedding, self.target_embedding)
-            self.S = torch.matmul(self.source_after_mapping, self.target_after_mapping.t())
-        else:
-            self.source_after_mapping = mapping_model(self.source_embedding)
-            self.S = torch.matmul(self.source_after_mapping, self.target_embedding.t())
+        self.source_after_mapping = mapping_model(self.source_embedding)
+        self.S = torch.matmul(self.source_after_mapping, self.target_embedding.t())
         
         self.S = self.S.detach().cpu().numpy()
 
