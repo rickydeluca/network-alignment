@@ -6,8 +6,6 @@ from torch_geometric.utils.convert import from_networkx
 
 from algorithms.network_alignment_model import NetworkAlignmentModel
 
-from algorithms.COMMON.models.model import Backbone
-
 
 def normalize_over_channels(x):
     channel_norms = torch.norm(x, dim=1, keepdim=True)
@@ -85,34 +83,8 @@ class COMMON(NetworkAlignmentModel):
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
 
-    def preprocess_data(self):
-        """
-        Prepare the required data for COMMON.
-        """
-
-        # Generate pytorch graphs from the datasets
-        source_graph = dataset_to_pyg(self.source_dataset, pos_info=False).to(self.device)
-        target_graph = dataset_to_pyg(self.target_dataset, pos_info=False).to(self.device)
-
-        # Construct the data dict
-        data_dict = {
-            'ns': [source_graph.num_nodes, target_graph.num_nodes],
-            'pyg_graphs': [source_graph, target_graph],
-            'batch_size': 1,
-            'gt_perm_mat': self.groundtruth.unsqueeze(0)
-        }
-
-        return data_dict
-
     def align(self):
-        data_dict = self.preprocess_data()
-        embedder = Backbone()
-        node_feature_list, x_list = embedder(data_dict, online=True)
-
-        print(f"node_feature_list: {node_feature_list.shape}")
-        print(f"x_list: {x_list.shape}")
-
-        return 
+        return 0
 
 
 
