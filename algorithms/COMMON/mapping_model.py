@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from algorithms.COMMON.lap_solvers import hungarian
 from algorithms.COMMON.loss import MappingLossFunctions
@@ -28,15 +27,15 @@ class InnerProduct(nn.Module):
 
 
 class SplineCNN(nn.Module):
-    def __init__(self):
+    def __init__(self, feature_channel=None, softmax_temp=None, rescale=None):
         super(SplineCNN, self).__init__()
-        self.message_pass_node_features = SiameseSConvOnNodes(input_node_dim=cfg.COMMON.FEATURE_CHANNEL * 2)
+        self.message_pass_node_features = SiameseSConvOnNodes(input_node_dim=feature_channel * 2)
         self.build_edge_features_from_node_features = SiameseNodeFeaturesToEdgeFeatures(
             total_num_nodes=self.message_pass_node_features.num_node_features
         )
         self.vertex_affinity = InnerProduct(256)
-        self.rescale = cfg.PROBLEM.RESCALE
-        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / cfg.COMMON.SOFTMAXTEMP))
+        self.rescale = rescale
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / softmax_temp))
 
         self.projection = nn.Sequential(
             nn.Linear(1024, 1024, bias=True),
@@ -47,11 +46,13 @@ class SplineCNN(nn.Module):
             nn.ReLU()
         )
 
-    def forward(self, source_graph, target_graph, online=True):
+    def forward(self, data_dict, online=True):
         with torch.no_grad():
-            self.logit_scale.clamp_(0, 4.6052)  # clamp temperature to be between 0.01 and 1
+            self.logit_scale.clamp_(0, 4.6052)  # Clamp temperature to be between 0.01 and 1
         
-
+        source_graph = data_dict['source_graph']
+        target_graph = data_dict['target_graph']
+        
         # Apply Spline Convolution
         conv_source_graph = self.message_pass_node_features(source_graph)
         conv_source_graph = self.build_edge_features_from_node_features(conv_source_graph)
@@ -64,7 +65,7 @@ class SplineCNN(nn.Module):
         conv_target_embedding = self.projection(conv_target_graph.x)
 
         unary_affinity = self.vertex_affinity(conv_source_embedding,
-                                                conv_target_embedding)
+                                              conv_target_embedding)
         
         embedding_list = [conv_source_embedding, conv_target_embedding]
 
@@ -82,10 +83,10 @@ class SplineCNN(nn.Module):
             return embedding_list
         
 
-
-
 class CommonMapping(nn.Module):
-    def __init__(self, source_embedding, target_embedding, backbone='splicecnn'):
+    def __init__(self, source_embedding, target_embedding, backbone=None,
+                 feature_channel=None, softmax_temp=None, momentum=None,
+                 warmup_step=None, epoch_iters=None, rescale=None, alpha=None):
 
         super(CommonMapping, self).__init__()
         self.source_embedding = source_embedding
@@ -93,7 +94,74 @@ class CommonMapping(nn.Module):
         self.loss_fn = MappingLossFunctions()
 
         if backbone == 'splinecnn':
-            self.online_net = SplineCNN()
-            self.momentum_net = SplineCNN()
+            self.online_net = SplineCNN(
+                feature_channel=feature_channel,
+                softmax_temp=softmax_temp,
+                rescale=rescale)
+            self.momentum_net = SplineCNN(
+                feature_channel=feature_channel,
+                softmax_temp=softmax_temp,
+                rescale=rescale)
         else:
-            raise ValueError(f"Bacbone '{backbone}' not implemented!")
+            raise ValueError(f"Backbone '{backbone}' is not implemented!")
+
+        self.backbone_params = None     # TODO
+        self.momentum = momentum
+        self.warmup_step = warmup_step
+        self.epoch_iters = epoch_iters
+        self.alpha = alpha
+
+        self.model_pairs = [[self.online_net, self.momentum_net]]
+        self.copy_params()  # Init momentum network
+
+    def forward(self, data_dict, training=False, iter_num=0, epoch=0):
+        # Compute distillation weight `alpha`
+        if epoch * self.epoch_iters + iter_num >= self.warmup_step:
+            alpha = self.alpha
+        else:
+            alpha = self.alpha * min(1, (epoch * self.epoch_iters + iter_num) / self.warmup_step)
+
+        # Get output from online network
+        online_embedding, perm_mat = self.online_net(data_dict, online=True)
+
+        if training:
+            # Get output from momentum network
+            with torch.no_grad():
+                self._momentum_update()
+                momentum_embedding = self.momentum_net(data_dict, online=False)
+
+            # Compute loss
+            loss = self.loss_fn.loss(feature=online_embedding,
+                                     feature_m=momentum_embedding,
+                                     alpha=alpha,
+                                     dynamic_temperature=self.online_net.logit_scale,
+                                     dynamic_temperature_m=self.momentum_net.logit_scale,
+                                     groundtruth=data_dict['gt_perm_mat'])
+
+            # Update dictionary
+            data_dict.update({
+                'perm_mat': perm_mat,
+                'loss': loss,
+                'ds_mat': None
+            })
+
+        else:   # Directly output the result
+            data_dict.update({
+                'perm_mat': perm_mat,
+                'ds_mat': None
+            })
+
+        return data_dict
+
+    @torch.no_grad()
+    def copy_params(self):
+        for model_pair in self.model_pairs:
+            for param, param_m in zip(model_pair[0].parameters(), model_pair[1].parameters()):
+                param_m.data.copy_(param.data)  # Initialize
+                param_m.requires_grad = False   # Not update by gradient
+
+    @torch.no_grad()
+    def _momentum_update(self):
+        for model_pair in self.model_pairs:
+            for param, param_m in zip(model_pair[0].parameters(), model_pair[1].parameters()):
+                param_m.data = param_m.data * self.momentum + param.data * (1. - self.momentum)

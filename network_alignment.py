@@ -1,15 +1,24 @@
 import argparse
-import csv
-import os
-import pdb
 import random
 from time import time
 
 import numpy as np
-import pandas as pd
 import torch
+
 import utils.graph_utils as graph_utils
-from algorithms import *
+from algorithms import (
+    COMMON,
+    FINAL,
+    HDA,
+    IONE,
+    MAGNA,
+    PALE,
+    REGAL,
+    SANE,
+    BigAlign,
+    DeepLink,
+    IsoRank,
+)
 from evaluation.metrics import get_statistics
 from input.dataset import Dataset
 

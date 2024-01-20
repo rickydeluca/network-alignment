@@ -70,7 +70,8 @@ class CommonEmbedding(nn.Module):
                 neg = neg.cuda()
             neighbor_output = self.node_embedding(neighbor_nodes)
             neg_output = self.node_embedding(neg)
-            # normalize
+
+            # Normalize
             neighbor_output = F.normalize(neighbor_output, dim=1)
             neg_output = F.normalize(neg_output, dim=1)
 
@@ -89,7 +90,8 @@ class CommonEmbedding(nn.Module):
         for i in range(0, self.n_nodes, BATCH_SIZE):
             j = min(i + BATCH_SIZE, self.n_nodes)
             batch_nodes = nodes[i:j]
-            if batch_nodes.shape[0] == 0: break
+            if batch_nodes.shape[0] == 0: 
+                break
             batch_node_embeddings = self.forward(batch_nodes)
             if embedding is None:
                 embedding = batch_node_embeddings

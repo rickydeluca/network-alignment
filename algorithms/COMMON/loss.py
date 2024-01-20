@@ -172,7 +172,10 @@ class MappingLossFunctions(object):
         self.contrast_loss = Distill_InfoNCE()
         self.graph_loss = Distill_QuadraticContrast()
 
-    def loss(self, feature, feature_m, alpha, dynamic_temperature, dynamic_temperature_m, groundtruth):
+    def loss(self, feature=None, feature_m=None, alpha=None, 
+             dynamic_temperature=None, dynamic_temperature_m=None, 
+             groundtruth=None):
+        
         loss =  self.contrast_loss(feature, feature_m, alpha, dynamic_temperature, dynamic_temperature_m, groundtruth) + \
                 self.graph_loss(feature, feature_m, dynamic_temperature, dynamic_temperature_m)
         
