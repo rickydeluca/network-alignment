@@ -163,30 +163,39 @@ def parse_args():
 
     # COMMON
     parser_COMMON = subparsers.add_parser('COMMON', help='COMMON algorithm')
-    # -- Training settings
-    parser_COMMON.add_argument('--train_dict', default='dataspace/ppi/REGAL-d05-seed1/dictionaries/node,split=0.2.train.dict')
-    parser_COMMON.add_argument('--device', default='cpu')
-    parser_COMMON.add_argument('train_epochs', type=int, default=20)
-    parser_COMMON.add_argument('--loss_func', type=str, default='custom')
-    parser_COMMON.add_argument('--optimizer', type=str, default='adam')
-    parser_COMMON.add_argument('--lr', type=float, default=3e-4)
+    parser_COMMON.add_argument('--cuda', action="store_true")
+    parser_COMMON.add_argument('--train_dict', default='dataspace/ppi/dictionaries/node,split=0.2.train.dict')
+    
+    parser_COMMON.add_argument('--emb_batch_size', type=int, default=512)
+    parser_COMMON.add_argument('--emb_epochs', type=int, default=1000)
+    parser_COMMON.add_argument('--emb_lr', type=float, default=0.01)
+    parser_COMMON.add_argument('--neg_sample_size', type=int, default=512)
+    parser_COMMON.add_argument('--embedding_dim', type=int, default=1024)
+    parser_COMMON.add_argument('--embedding_name', type=str, default='')
+
+    parser_COMMON.add_argument('--map_batch_size', type=int, default=32)
+    parser_COMMON.add_argument('--map_epochs', type=int, default=20)
+    parser_COMMON.add_argument('--map_epoch_iters', type=int, default=2000)
+    parser_COMMON.add_argument('--map_lr', type=float, default=3e-4)
+    parser_COMMON.add_argument('--map_lr_decay', type=float, default=0.5)
+    parser_COMMON.add_argument('--map_lr_step', type=list, nargs='+', default=[2,4,6,8,10])
+    parser_COMMON.add_argument('--map_loss_func', type=str, default='custom')
+    parser_COMMON.add_argument('--map_optimizer', type=str, default='adam')
+    parser_COMMON.add_argument('--backbone', type=str, default='splinecnn')
+    parser_COMMON.add_argument('--rescale', type=int, default=256)
     parser_COMMON.add_argument('--separate_backbone_lr', action='store_true', default=False)
-    parser_COMMON.add_argument('--backbone_lr', type=float, default=2e-5)
-    parser_COMMON.add_argument('--train_momentum', type=float, default=0.9)
-    parser_COMMON.add_argument('--lr_decay', type=float, default=0.5)
-    parser_COMMON.add_argument('--lr_step', nargs='+', default=[2,4,6,8,10])
-    parser_COMMON.add_argument('--epoch_iters', type=int, default=2000)
-
-    # -- Evaluation settings
-    parser_COMMON.add_argument('--eval_epochs', type=int, default=20)
-
-    # -- Model settings
-    parser_COMMON.add_argument('--feature_channel', type=int, default=512)
+    parser_COMMON.add_argument('--backbone_lr', type=float, default=3e-4)
+    parser_COMMON.add_argument('--map_optimizer_momentum', type=float, default=0.9)
+    parser_COMMON.add_argument('--map_softmax_temp', type=float, default=0.07)
+    parser_COMMON.add_argument('--map_eval_epochs', type=int, default=20)
+    parser_COMMON.add_argument('--map_feature_channel', type=int, default=512)
     parser_COMMON.add_argument('--alpha', type=float, default=0.4)
-    parser_COMMON.add_argument('--distill', action='store_true', default=False)
+    parser_COMMON.add_argument('--distill', action='store_true', default=True)
     parser_COMMON.add_argument('--warmup_step', type=int, default=2000)
     parser_COMMON.add_argument('--distill_momentum', type=float, default=0.995)
-
+    
+    
+    
     
     return parser.parse_args()
 

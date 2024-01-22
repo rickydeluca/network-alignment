@@ -18,6 +18,11 @@ def normalize_over_channels(x):
     return x / channel_norms
 
 
+def generate_unique_edge_attr(num_edges):
+    edge_attr = torch.rand((num_edges, 2), dtype=torch.float)
+    return edge_attr
+
+
 def dataset_to_pyg(dataset, pos_info=False, normalize=False):
     """
     Given a `Dataset` object, return the corresponding pyg graph.
@@ -62,6 +67,34 @@ def dataset_to_pyg(dataset, pos_info=False, normalize=False):
     return data
 
 
+def networkx_to_pyg(G, node_feats=None, edge_feats=None, normalize=False):
+    pyg_graph = from_networkx(G)
+
+    if node_feats is not None:
+        # x = torch.from_numpy(node_feats)
+        x = node_feats
+        if normalize:
+            x = normalize_over_channels(x)
+    else:
+        x = None
+
+    if edge_feats is not None:
+        # edge_attr = torch.from_numpy(edge_feats)
+        edge_attr = edge_feats
+        if normalize:
+            edge_attr = normalize_over_channels(edge_attr)
+    else:
+        edge_attr = generate_unique_edge_attr(pyg_graph.num_edges)
+
+    # DEBUG
+    print('edge_attr shape:', edge_attr.shape)
+
+    pyg_graph.x = x
+    pyg_graph.edge_attr = edge_attr
+
+    return pyg_graph
+
+
 class COMMON(NetworkAlignmentModel):
     def __init__(self, source_dataset, target_dataset, args):
         super().__init__(source_dataset, target_dataset)
@@ -70,17 +103,18 @@ class COMMON(NetworkAlignmentModel):
         self.source_dataset = source_dataset
         self.target_dataset = target_dataset
         self.train_dict = args.train_dict
-        self.gt = load_gt(
-            args.train_dict, source_dataset.id2idx, target_dataset.id2idx, "dict"
-        )
+
+        self.gt = load_gt(args.train_dict, source_dataset.id2idx, target_dataset.id2idx, "dict")
         self.gt_train = {
             self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v]
             for k, v in self.gt.items()
         }
+        self.gt_train_perm_mat = torch.from_numpy(load_gt(args.train_dict, source_dataset.id2idx, target_dataset.id2idx))
+
         self.seed = args.seed
         self.cuda = args.cuda
         self.device = torch.device(
-            "cuda:0" if (args.cuda and torch.cuda.is_avaliable()) else "cpu"
+            "cuda:0" if (self.cuda and torch.cuda.is_available()) else "cpu"
         )
 
         self.S = None
@@ -104,6 +138,7 @@ class COMMON(NetworkAlignmentModel):
         self.map_lr_decay = args.map_lr_decay
         self.map_lr_step = args.map_lr_step
         self.map_optimizer = args.map_optimizer
+        self.map_loss_func = args.map_loss_func
         self.backbone = args.backbone
         self.rescale = args.rescale
         self.separate_backbone_lr = args.separate_backbone_lr
@@ -132,7 +167,7 @@ class COMMON(NetworkAlignmentModel):
         # Learn starting embeddings using the same module from PALE
         self.learn_embeddings()
 
-        # Convert learned embeddings in `word2vec` format
+        # Save learned embeddings in `word2vec` format
         self.to_word2vec_format(
             self.source_embedding,
             self.source_dataset.G.nodes(),
@@ -157,6 +192,9 @@ class COMMON(NetworkAlignmentModel):
         # Compute alignment with all the dataset
         self.mapping_model.eval()
         self.mapping_model.moudle.trainings = False
+
+        inputs = {'source_graph': self.source_graph,
+                  'target_graph': self.target_graph}
         outputs = self.mapping_model(inputs)
 
         self.S = outputs['perm_mat']
@@ -179,10 +217,10 @@ class COMMON(NetworkAlignmentModel):
         print("Done extend edges")
         self.source_embedding = self.learn_embedding(
             num_source_nodes, source_deg, source_edges
-        )  # , 's')
+        )
         self.target_embedding = self.learn_embedding(
             num_target_nodes, target_deg, target_edges
-        )  # , 't')
+        )
 
     def learn_embedding(self, num_nodes, deg, edges):
         embedding_model = CommonEmbedding(
@@ -274,10 +312,18 @@ class COMMON(NetworkAlignmentModel):
     #   ALIGNMENT LEARNING
     # ======================
     def learn_alignment(self):
+        # Generate the pytorch geometric graph objects using the learned embeddings
+        self.source_graph = networkx_to_pyg(self.source_dataset.G,
+                                       node_feats=self.source_embedding,
+                                       normalize=True).to(self.device)
+        self.target_graph = networkx_to_pyg(self.target_dataset.G,
+                                       node_feats=self.target_embedding,
+                                       normalize=True).to(self.device)
+
         # Define model
         model = CommonMapping(
-            source_embedding=self.source_embedding,  # Learned in the...
-            target_embedding=self.target_embedding,  # ... encoding layer
+            # source_embedding=self.source_embedding,  # Learned in the...
+            # target_embedding=self.target_embedding,  # ... encoding layer
             backbone=self.backbone,
             feature_channel=self.map_feature_channel,
             softmax_temp=self.map_softmax_temp,
@@ -285,7 +331,7 @@ class COMMON(NetworkAlignmentModel):
             warmup_step=self.warmup_step,
             epoch_iters=self.map_epoch_iters,
             rescale=self.rescale,
-            alpha=self.alpha,
+            alpha=self.alpha
         )
 
         model = model.to(self.device)
@@ -324,7 +370,7 @@ class COMMON(NetworkAlignmentModel):
             raise ValueError(f"Invalid optimizer: {self.map_optimizer}")
 
         # Training
-        model = self.train_eval_model(
+        model = self.train_eval_alignment(
             model=model,
             criterion=criterion,
             optimizer=optimizer,
@@ -345,12 +391,12 @@ class COMMON(NetworkAlignmentModel):
         num_epochs=25,
         start_epoch=0,
     ):
-        print("Start alignment training...")
+        print(f"Start alignment training on device '{self.device}'...")
 
         start_training_time = time.time()
 
         # Define learning rate scheduler
-        scheduler = torch.optim.lr_scheduler.MultisStepLR(
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(
             optimizer,
             milestones=self.map_lr_step,
             gamma=self.map_lr_decay,
@@ -372,7 +418,7 @@ class COMMON(NetworkAlignmentModel):
 
             # Se model to training mode
             model.train()
-            model.module.trainings = True
+            # model.modules.trainings = True
 
             print(f"Epoch {epoch+1}/{num_epochs}")
             print('lr = ' + ', '.join(['{:.2e}'.format(x['lr']) for x in optimizer.param_groups]))
@@ -380,11 +426,23 @@ class COMMON(NetworkAlignmentModel):
             # Mini-batching
             np.random.shuffle(self.source_train_nodes)
             for iter in range(num_iters):
+                # Get the batch with the index subset
                 source_batch = self.source_train_nodes[iter*self.map_batch_size:(iter+1)*self.map_batch_size]
                 target_batch = [self.gt_train[x] for x in source_batch]
 
-                source_batch = torch.LongTensor(source_batch, device=self.device)
-                target_batch = torch.LongTensor(target_batch, device=self.device)
+                source_batch = torch.LongTensor(source_batch)
+                target_batch = torch.LongTensor(target_batch)
+
+                # Get the subset of the groundtruth training matrix using only the 
+                # indices in the batch
+                gt_batch_perm_mat = self.gt_train_perm_mat
+
+                # Prepare the input dictionary
+                inputs = {'source_graph': self.source_graph,
+                          'target_graph': self.target_graph,
+                          'source_batch': source_batch,
+                          'target_batch': target_batch,
+                          'gt_perm_mat': gt_batch_perm_mat}
 
                 # Zero the parameter gradients
                 optimizer.zero_grad()

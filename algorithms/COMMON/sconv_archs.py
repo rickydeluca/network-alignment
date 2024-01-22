@@ -58,11 +58,17 @@ class SiameseNodeFeaturesToEdgeFeatures(torch.nn.Module):
         super(SiameseNodeFeaturesToEdgeFeatures, self).__init__()
         self.num_edge_features = total_num_nodes
 
+    # def forward(self, graph, hyperedge=False):
+    #     orig_graphs = graph.to_data_list()
+    #     orig_graphs = [self.vertex_attr_to_edge_attr(graph) for graph in orig_graphs]
+    #     if hyperedge:
+    #         orig_graphs = [self.vertex_attr_to_hyperedge_attr(graph) for graph in orig_graphs]
+    #     return orig_graphs
+        
     def forward(self, graph, hyperedge=False):
-        orig_graphs = graph.to_data_list()
-        orig_graphs = [self.vertex_attr_to_edge_attr(graph) for graph in orig_graphs]
+        orig_graphs = graph
         if hyperedge:
-            orig_graphs = [self.vertex_attr_to_hyperedge_attr(graph) for graph in orig_graphs]
+            orig_graphs = self.vertex_attr_to_hyperedge_attr(graph)
         return orig_graphs
 
     def vertex_attr_to_edge_attr(self, graph):

@@ -7,4 +7,6 @@ python network_alignment.py \
 --target_dataset ${PD}/${PREFIX}/graphsage/ \
 --groundtruth ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.test.dict \
 COMMON \
+--cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
+--emb_epochs 1
