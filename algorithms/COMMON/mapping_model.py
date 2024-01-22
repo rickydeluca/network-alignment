@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from algorithms.COMMON.lap_solvers import hungarian
 from algorithms.COMMON.loss import MappingLossFunctions
@@ -10,23 +11,66 @@ from algorithms.COMMON.sconv_archs import (
 )
 
 
-class InnerProduct(nn.Module):
+class InnerProduct_Batch(nn.Module):
     def __init__(self, output_dim):
         super(InnerProduct, self).__init__()
         self.d = output_dim
 
     def _forward(self, X, Y):
-        # assert X.shape[1] == Y.shape[1] == self.d, (X.shape[1], Y.shape[1], self.d)   # DEBUG
-        assert X.shape[0] == Y.shape[0] == self.d, (X.shape[1], Y.shape[1], self.d)
+        assert X.shape[1] == Y.shape[1] == self.d, (X.shape[1], Y.shape[1], self.d)
         X = torch.nn.functional.normalize(X, dim=-1)
         Y = torch.nn.functional.normalize(Y, dim=-1)
-        # res = torch.matmul(X, Y.transpose(0, 1))  # DEBUG
-        res = torch.matmul(X, Y.T)
+        res = torch.matmul(X, Y.transpose(0, 1))
         return res
 
     def forward(self, Xs, Ys):
         return [self._forward(X, Y) for X, Y in zip(Xs, Ys)]
+    
+class InnerProduct(nn.Module):
+    def __init__(self, output_dim):
+        super(InnerProduct, self).__init__()
+        self.d = output_dim
 
+    def forward(self, X, Y):
+        assert X.shape[1] == Y.shape[1] == self.d, (X.shape[1], Y.shape[1], self.d)
+        X = torch.nn.functional.normalize(X, dim=-1)
+        Y = torch.nn.functional.normalize(Y, dim=-1)
+        res = torch.matmul(X, Y.transpose(0, 1))
+        return res
+
+
+class Linear(nn.Module):
+    def __init__(self, feature_channel=None, softmax_temp=None):
+        super(Linear, self).__init__()
+        self.maps = nn.Linear(feature_channel*2, feature_channel*2, bias=True)
+        self.vertex_affinity = InnerProduct(1024)
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / softmax_temp))
+
+    def forward(self, data_dict, online=False):
+        source_feats = data_dict['source_embedding']
+        # source_feats = source_feats[data_dict['source_batch']]
+
+        source_feats = self.maps(source_feats)
+        source_feats = F.normalize(source_feats, dim=1)
+
+        target_feats = data_dict['target_embedding']
+        # target_feats = source_feats[data_dict['target_batch']]
+
+        embedding_list = [source_feats, target_feats]
+        unary_affinity = self.vertex_affinity(source_feats, target_feats)
+        
+        if online:
+            Kp = unary_affinity
+
+            # Get permutation matrix through the Hungarian matching algorithm
+            num_source_nodes = torch.tensor(data_dict['source_graph'].num_nodes).unsqueeze(0)
+            num_target_nodes = torch.tensor(data_dict['target_graph'].num_nodes).unsqueeze(0)
+            perm_matrix = hungarian(Kp, num_source_nodes, num_target_nodes)
+
+            return embedding_list, perm_matrix
+        else:
+            return embedding_list
+        
 
 class SplineCNN(nn.Module):
     def __init__(self, feature_channel=None, softmax_temp=None, rescale=None):
@@ -60,8 +104,8 @@ class SplineCNN(nn.Module):
         target_graph = data_dict["target_graph"]
 
         # DEBUG
-        print('source_graph:', source_graph)
-        print('target_graph:', target_graph)
+        # print('source_graph:', source_graph)
+        # print('target_graph:', target_graph)
 
         # Apply Spline Convolution
         conv_source_graph = self.message_pass_node_features(source_graph)
@@ -73,12 +117,16 @@ class SplineCNN(nn.Module):
         )
 
         # DEBUG
-        print('conv_source_graph:', conv_source_graph)
-        print('conv_target_graph:', conv_target_graph)
+        # print('conv_source_graph:', conv_source_graph)
+        # print('conv_target_graph:', conv_target_graph)
 
         # Compute vertex affinity
         conv_source_embedding = self.projection(conv_source_graph.x)
         conv_target_embedding = self.projection(conv_target_graph.x)
+
+        # DEBUG
+        # print('conv_source_embedding:', conv_source_embedding.shape)
+        # print('conv_target_embedding:', conv_target_embedding.shape)
 
         unary_affinity = self.vertex_affinity(
             conv_source_embedding, conv_target_embedding
@@ -86,12 +134,17 @@ class SplineCNN(nn.Module):
 
         embedding_list = [conv_source_embedding, conv_target_embedding]
 
+        # DEBUG
+        # print('unary_affinity:', unary_affinity.shape)
+        # exit(0)
+
         if online:
-            Kp = torch.tensor(unary_affinity)
+            # Kp = torch.tensor(unary_affinity)
+            Kp = unary_affinity
 
             # Get permutation matrix through the Hungarian matching algorithm
-            num_source_nodes = conv_source_graph.num_nodes
-            num_target_nodes = conv_target_graph.num_nodes
+            num_source_nodes = torch.tensor(conv_source_graph.num_nodes).unsqueeze(0)
+            num_target_nodes = torch.tensor(conv_target_graph.num_nodes).unsqueeze(0)
             perm_matrix = hungarian(Kp, num_source_nodes, num_target_nodes)
 
             return embedding_list, perm_matrix
@@ -129,6 +182,15 @@ class CommonMapping(nn.Module):
                 feature_channel=feature_channel,
                 softmax_temp=softmax_temp,
                 rescale=rescale
+            )
+        elif backbone == 'linear':
+            self.online_net = Linear(
+                feature_channel=feature_channel,
+                softmax_temp=softmax_temp
+            )
+            self.momentum_net = Linear(
+                feature_channel=feature_channel,
+                softmax_temp=softmax_temp
             )
         else:
             raise ValueError(f"Backbone '{backbone}' is not implemented!")

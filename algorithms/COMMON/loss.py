@@ -92,6 +92,17 @@ class Distill_InfoNCE(torch.nn.Module):
 
     def forward(self, feature: Tensor, feature_m: Tensor, alpha: float, dynamic_temperature: Tensor,
                 dynamic_temperature_m: Tensor, groundtruth:Tensor) -> Tensor:
+        
+        # DEBUG: Verify devices
+        # print("Loss device:")
+        # print('source feature: ', feature[0].device)
+        # print('target feature: ', feature[1].device)
+        # print('source feature_m: ', feature_m[0].device)
+        # print('target feature_m: ', feature_m[1].device)
+        # print('dynamic_temperature: ', dynamic_temperature.device)
+        # print('dynamic_temperature_m: ', dynamic_temperature_m.device)
+        # print('groundtruth: ', groundtruth.device)
+
         graph1_feat = F.normalize(feature[0], dim=-1)
         graph2_feat = F.normalize(feature[1], dim=-1)
 

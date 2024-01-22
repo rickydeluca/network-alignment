@@ -87,7 +87,7 @@ def networkx_to_pyg(G, node_feats=None, edge_feats=None, normalize=False):
         edge_attr = generate_unique_edge_attr(pyg_graph.num_edges)
 
     # DEBUG
-    print('edge_attr shape:', edge_attr.shape)
+    # print('edge_attr shape:', edge_attr.shape)
 
     pyg_graph.x = x
     pyg_graph.edge_attr = edge_attr
@@ -191,13 +191,16 @@ class COMMON(NetworkAlignmentModel):
 
         # Compute alignment with all the dataset
         self.mapping_model.eval()
-        self.mapping_model.moudle.trainings = False
+        # self.mapping_model.moudle.trainings = False
 
         inputs = {'source_graph': self.source_graph,
-                  'target_graph': self.target_graph}
+                  'target_graph': self.target_graph,
+                  'source_embedding': self.source_embedding,
+                  'target_embedding': self.target_embedding}
+        
         outputs = self.mapping_model(inputs)
 
-        self.S = outputs['perm_mat']
+        self.S = outputs['perm_mat'].detach().cpu().numpy()
         return self.S
 
     # ======================
@@ -394,6 +397,7 @@ class COMMON(NetworkAlignmentModel):
         print(f"Start alignment training on device '{self.device}'...")
 
         start_training_time = time.time()
+        avg_map_epoch_time = 0
 
         # Define learning rate scheduler
         scheduler = torch.optim.lr_scheduler.MultiStepLR(
@@ -435,11 +439,13 @@ class COMMON(NetworkAlignmentModel):
 
                 # Get the subset of the groundtruth training matrix using only the 
                 # indices in the batch
-                gt_batch_perm_mat = self.gt_train_perm_mat
+                gt_batch_perm_mat = self.gt_train_perm_mat.to(self.device)
 
                 # Prepare the input dictionary
                 inputs = {'source_graph': self.source_graph,
                           'target_graph': self.target_graph,
+                          'source_embedding': self.source_embedding,
+                          'target_embedding': self.target_embedding,
                           'source_batch': source_batch,
                           'target_batch': target_batch,
                           'gt_perm_mat': gt_batch_perm_mat}
@@ -468,14 +474,14 @@ class COMMON(NetworkAlignmentModel):
 
                 # Print mini-batch stats
                 if total_steps % print_every == 0 and total_steps > 0:
-                    print(f'Iter:\t{iter:.3d}',
+                    print(f'Iter:\t{iter}',
                           f'train_loss =\t{loss.item():.5f}',
                           f'time:\t{(time.time()-start_batch_time):.5f}')
                 total_steps += 1
 
 
             # Save average epoch time
-            self.avg_map_epoch_time += (time.time() - start_epoch_time) / num_epochs
+            avg_map_epoch_time += (time.time() - start_epoch_time) / num_epochs
 
             # Update scheduler
             scheduler.step()
@@ -485,6 +491,6 @@ class COMMON(NetworkAlignmentModel):
         print('Training complete in {:.0f}h {:.0f}m {:.0f}s'
             .format(time_elapsed // 3600, (time_elapsed // 60) % 60, time_elapsed % 60))
         
-        print(f'Average training epoch time: {self.avg_map_epoch_time:.3f}')
+        print(f'Average training epoch time: {avg_map_epoch_time:.3f}')
 
         return model
