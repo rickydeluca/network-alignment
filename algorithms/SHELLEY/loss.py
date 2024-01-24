@@ -32,7 +32,7 @@ class Distill_InfoNCE(nn.Module):
             # online similiarity
             # sim_targets = torch.zeros(sim_1to2_m.size()).to(graph1_feat.device)
             # sim_targets.fill_diagonal_(1)
-            sim_targets = groundtruth
+            sim_targets = groundtruth     # TODO
 
             # generate pseudo contrastive labels
             sim_1to2_targets = alpha * sim_1to2_m + (1 - alpha) * sim_targets
@@ -86,20 +86,14 @@ class Distill_QuadraticContrast(nn.Module):
         return graph_loss
     
 
-class CommonLoss(object):
+class CommonLoss(nn.Module):
     def __init__(self):
+        super(CommonLoss, self).__init__()
+        
         self.contrast_loss = Distill_InfoNCE()
         self.graph_loss = Distill_QuadraticContrast()
 
-    def forward(self, feature, feature_m, alpha, dynamic_temperature, dynamic_temperature_m, groundtruth):
-        
-        # feature = args.feature
-        # feature_m = args.feature_m
-        # alpha = args.alpha
-        # dynamic_temperature = args.dynamic_temperature
-        # dynamic_temperature_m = args.dynamic_temperature_m
-        # groundtruth = args.groundtruth
-        
+    def forward(self, feature, feature_m, alpha, dynamic_temperature, dynamic_temperature_m, groundtruth):        
         return  self.contrast_loss(feature, feature_m, alpha, dynamic_temperature, dynamic_temperature_m, groundtruth) + \
                 self.graph_loss(feature, feature_m, dynamic_temperature, dynamic_temperature_m)
 
@@ -111,3 +105,5 @@ def get_loss_function(name: str):
 
     if name == 'common':
         return CommonLoss()
+    else:
+        raise Exception(f"Invalid loss: {name}.")

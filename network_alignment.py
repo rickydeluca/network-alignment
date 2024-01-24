@@ -199,18 +199,31 @@ def parse_args():
     parser_SHELLEY = subparsers.add_parser('SHELLEY', help='SHELLEY algorithm')
     parser_SHELLEY.add_argument('--train_dict', default='dataspace/ppi/dictionaries/node,split=0.2.train.dict')
     parser_SHELLEY.add_argument('--use_pretrained', action='store_true', default=False)
-    parser_SHELLEY.add_argument('--cuda', action="store_true", default=True)
+    parser_SHELLEY.add_argument('--skip_train', action='store_true', default=False)
+    parser_SHELLEY.add_argument('--seed', type=int, default=42)
+    parser_SHELLEY.add_argument('--cuda', action="store_true", default=False)
     
     parser_SHELLEY.add_argument('--backbone', type=str, default='gin')
     parser_SHELLEY.add_argument('--node_feature_dim', type=int, default=1)
     parser_SHELLEY.add_argument('--dim', type=int, default=256)
+    parser_SHELLEY.add_argument('--softmax_temp', type=float, default=0.07)
     
     parser_SHELLEY.add_argument('--head', type=str, default='common')
     parser_SHELLEY.add_argument('--distill', action='store_true', default=True)
     parser_SHELLEY.add_argument('--distill_momentum', type=float, default=0.995)
     parser_SHELLEY.add_argument('--warmup_step', type=int, default=2000)
-    parser_SHELLEY.add_argument('--epoch_iters', type=int, default=2000)
+    parser_SHELLEY.add_argument('--epoch_iters', type=int, default=1)
     parser_SHELLEY.add_argument('--alpha', type=float, default=0.4)
+
+    parser_SHELLEY.add_argument('--optimizer', type=str, default='adam')
+    parser_SHELLEY.add_argument('--optim_momentum', type=float, default=0.9)
+    parser_SHELLEY.add_argument('--lr', type=float, default=1e-4)
+    parser_SHELLEY.add_argument('--lr_step', type=list, nargs='+', default=[2,4,6,8,10])
+    parser_SHELLEY.add_argument('--lr_decay', type=float, default=0.5)
+    parser_SHELLEY.add_argument('--start_epoch', type=int, default=0)
+    parser_SHELLEY.add_argument('--num_epochs', type=int, default=100)
+    parser_SHELLEY.add_argument('--batchsize', type=int, default=8)
+
     
     return parser.parse_args()
 

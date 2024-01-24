@@ -74,16 +74,21 @@ class CommonHead(nn.Module):
             with torch.no_grad():
                 self._momentum_update()
                 embedding_m_list = self.momentum_net(data_dict)
-                
-            loss = self.loss_fn(embedding_list,
-                                embedding_m_list,
+
+            # take batch features
+            embedding_list_batch = [embedding_list[0][data_dict.source_batch], embedding_list[1][data_dict.target_batch]]
+            embedding_m_list_batch = [embedding_m_list[0][data_dict.source_batch], embedding_m_list[1][data_dict.target_batch]]
+
+            loss = self.loss_fn(embedding_list_batch,
+                                embedding_m_list_batch,
                                 alpha,
                                 self.online_net.logit_scale,
                                 self.momentum_net.logit_scale,
-                                data_dict.groundtruth)
+                                data_dict.gt_perm_mat)
 
             # update the dictionary
             data_dict.update({
+                'aff_mat': aff_mat,
                 'perm_mat': perm_mat,
                 'loss': loss,
                 'ds_mat': None
@@ -91,6 +96,7 @@ class CommonHead(nn.Module):
 
         else:  # directly output the predicted alignment
             data_dict.update({
+                'aff_mat': aff_mat,
                 'perm_mat': perm_mat,
                 'ds_mat': None
             })

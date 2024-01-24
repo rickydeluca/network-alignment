@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch.nn import Linear, Sequential, Tanh
 from torch_geometric.nn import GINConv
@@ -8,12 +9,14 @@ class GIN(torch.nn.Module):
     The graph nerual network described in "Stochastic Iterative Graph Matching"
     by Liu et al. (2021).
     """
-    def __init__(self, in_channels, out_channels, dim, bias=True):
+    def __init__(self, in_channels, out_channels, dim, softmax_temp=1, bias=True):
         super(GIN, self).__init__()
 
         act = Tanh()
         eps = 0.0
         train_eps = False
+
+        self.logit_scale = torch.nn.Parameter(torch.ones([]) * np.log(1 / softmax_temp))
 
         self.bn_in = torch.nn.BatchNorm1d(in_channels)
 
@@ -86,9 +89,10 @@ def get_backbone(name: str, cfg: dict):
         
         in_channels = cfg.node_feature_dim
         out_channels = cfg.dim 
-        dim = cfg.dim 
+        dim = cfg.dim
+        softmax_temp = cfg.softmax_temp
 
-        return GIN(in_channels, out_channels, dim, bias=True)
+        return GIN(in_channels, out_channels, dim, softmax_temp=softmax_temp, bias=True)
 
     else:
         raise Exception(f"Invalid backbone name: {name}.")

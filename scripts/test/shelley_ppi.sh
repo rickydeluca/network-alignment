@@ -1,5 +1,5 @@
 PD=dataspace/ppi
-PREFIX=REGAL-d05-seed1
+PREFIX=REGAL-d2-seed1
 TRAINRATIO=0.2
 
 python network_alignment.py \
@@ -9,3 +9,6 @@ python network_alignment.py \
 SHELLEY \
 --cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
+--batchsize 300 \
+--num_epochs 10 \
+--skip_train
