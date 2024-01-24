@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from algorithms.SHELLEY.backbone import get_backbone
 from algorithms.SHELLEY.loss import get_loss_function
+from algorithms.SHELLEY.utils.lap_solvers import hungarian
+
 
 class InnerProduct(nn.Module):
     def __init__(self, output_dim):
@@ -18,7 +19,7 @@ class InnerProduct(nn.Module):
         return res
 
 
-class Net(nn.Module):
+class CommonHead(nn.Module):
     def __init__(self, cfg):
         """
         Args:
@@ -28,25 +29,24 @@ class Net(nn.Module):
         Returns:
             model:  The trained model.
         """
-        super(Net, self).__init__()
+        super(CommonHead, self).__init__()
 
         # model parameters
-        self.online_net = get_backbone(name=cfg.BACKBONE.NAME, args=cfg.BACKBONE)
-        self.momentum_net = get_backbone(name=cfg.BACKBONE.NAME, args=cfg.BACKBONE)
-        self.momentum = cfg.MODEL.MOMENTUM          # for momentum network
-        self.warmup_step = cfg.MODEL.WARMUP_STEP    # to reach the final alpha
-        self.epoch_iters = cfg.MODEL.EPOCH_ITERS    
-        self.final_alpha = cfg.MODEL.ALPHA          # target after warmup step
-        self.distill = cfg.MODEL.DISTILL            # boolean
+        self.online_net = get_backbone(name=cfg.backbone.name, cfg=cfg.backbone)
+        self.momentum_net = get_backbone(name=cfg.backbone.name, cfg=cfg.backbone)
+        self.momentum = cfg.model.momentum          # for momentum network
+        self.warmup_step = cfg.model.warmup_step    # to reach the final alpha
+        self.epoch_iters = cfg.model.epoch_iters    
+        self.final_alpha = cfg.model.alpha          # target after warmup step
+        self.distill = cfg.model.distill            # boolean
 
-        self.model_pairs = [self.online_net, self.momentum_net]
+        self.model_pairs = [[self.online_net, self.momentum_net]]
         self.copy_params()  # init momentum network
 
-        self.vertex_affinity = InnerProduct(cfg.BACKBONE.OUT_CHANNELS)
+        self.vertex_affinity = InnerProduct(1536)   # DEBUG
 
         # define loss function
-        self.loss_fn_name = cfg.TRAIN.LOSS
-        self.loss_fn = get_loss_function(name=self.loss_fn_name)
+        self.loss_fn = get_loss_function(name='common')
 
     def forward(self, data_dict, training=False, iter_num=0, epoch=0):
         # compute the distillation weight `alpha`
@@ -56,13 +56,15 @@ class Net(nn.Module):
             alpha = self.final_alpha * min(1, (epoch * self.epoch_iters + iter_num) / self.warmup_step)
         
         # get output of the online network
-        embedding_list = self.online_net(data_dict) # [source_emb_tensor, target_emb_tensor]
+        embedding_list = self.online_net(data_dict) # out: [source_emb_tensor, target_emb_tensor]
 
         # generate node affinity matrix using the node embeddings
         aff_mat = self.vertex_affinity(embedding_list[0], embedding_list[1])
 
         # generate the permutation matrix (the predicted alignments)
-        perm_mat = None     # TODO
+        num_source_nodes = torch.tensor(aff_mat.shape[0]).unsqueeze(0)
+        num_target_nodes = torch.tensor(aff_mat.shape[1]).unsqueeze(0)
+        perm_mat = hungarian(aff_mat, num_source_nodes, num_target_nodes)
 
         if training is True:
             # the momentum network is used only during training
@@ -72,18 +74,13 @@ class Net(nn.Module):
             with torch.no_grad():
                 self._momentum_update()
                 embedding_m_list = self.momentum_net(data_dict)
-
-            # compute loss
-            if self.loss_fn_name == 'common':
-                loss_args = {'feature': embedding_list,
-                            'feature_m': embedding_m_list,
-                            'dynamic_temperature': self.online_net.logit_scale,
-                            'dynamic_temperature_m': self.momentum_net.logit_scale,
-                            'groundtruth': data_dict.groundtruth}
-            else:
-                raise Exception(f"Invalid loss: {self.loss_fn_name}")
                 
-            loss = self.loss_fn(loss_args)
+            loss = self.loss_fn(embedding_list,
+                                embedding_m_list,
+                                alpha,
+                                self.online_net.logit_scale,
+                                self.momentum_net.logit_scale,
+                                data_dict.groundtruth)
 
             # update the dictionary
             data_dict.update({
@@ -113,3 +110,13 @@ class Net(nn.Module):
         for model_pair in self.model_pairs:
             for param, param_m in zip(model_pair[0].parameters(), model_pair[1].parameters()):
                 param_m.data = param_m.data * self.momentum + param.data * (1. - self.momentum)
+
+
+
+def get_head(name, cfg):
+    if name == 'common':
+        model = CommonHead(cfg)
+    else:
+        raise Exception(f"Invalid head: {name}.")
+    
+    return model

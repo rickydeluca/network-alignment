@@ -373,13 +373,13 @@ class COMMON(NetworkAlignmentModel):
             raise ValueError(f"Invalid optimizer: {self.map_optimizer}")
 
         # Training
-        model = self.train_eval_alignment(
-            model=model,
-            criterion=criterion,
-            optimizer=optimizer,
-            num_epochs=self.map_epochs,
-            start_epoch=0
-        )
+        # model = self.train_eval_alignment(
+        #     model=model,
+        #     criterion=criterion,
+        #     optimizer=optimizer,
+        #     num_epochs=self.map_epochs,
+        #     start_epoch=0
+        # )
 
         # Save the trained mapping model
         self.mapping_model = model

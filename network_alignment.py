@@ -18,6 +18,7 @@ from algorithms import (
     BigAlign,
     DeepLink,
     IsoRank,
+    SHELLEY
 )
 from evaluation.metrics import get_statistics
 from input.dataset import Dataset
@@ -194,8 +195,22 @@ def parse_args():
     parser_COMMON.add_argument('--warmup_step', type=int, default=2000)
     parser_COMMON.add_argument('--distill_momentum', type=float, default=0.995)
     
+    # SHELLEY
+    parser_SHELLEY = subparsers.add_parser('SHELLEY', help='SHELLEY algorithm')
+    parser_SHELLEY.add_argument('--train_dict', default='dataspace/ppi/dictionaries/node,split=0.2.train.dict')
+    parser_SHELLEY.add_argument('--use_pretrained', action='store_true', default=False)
+    parser_SHELLEY.add_argument('--cuda', action="store_true", default=True)
     
+    parser_SHELLEY.add_argument('--backbone', type=str, default='gin')
+    parser_SHELLEY.add_argument('--node_feature_dim', type=int, default=1)
+    parser_SHELLEY.add_argument('--dim', type=int, default=256)
     
+    parser_SHELLEY.add_argument('--head', type=str, default='common')
+    parser_SHELLEY.add_argument('--distill', action='store_true', default=True)
+    parser_SHELLEY.add_argument('--distill_momentum', type=float, default=0.995)
+    parser_SHELLEY.add_argument('--warmup_step', type=int, default=2000)
+    parser_SHELLEY.add_argument('--epoch_iters', type=int, default=2000)
+    parser_SHELLEY.add_argument('--alpha', type=float, default=0.4)
     
     return parser.parse_args()
 
@@ -234,6 +249,8 @@ if __name__ == '__main__':
         model = SANE(source_dataset, target_dataset, args)
     elif algorithm == "COMMON":
         model = COMMON(source_dataset, target_dataset, args)
+    elif algorithm == "SHELLEY":
+        model = SHELLEY(source_dataset, target_dataset, args)
     else:
         raise Exception("Unsupported algorithm")
 

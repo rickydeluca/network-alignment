@@ -6,8 +6,6 @@ python network_alignment.py \
 --source_dataset ${PD}/graphsage/ \
 --target_dataset ${PD}/${PREFIX}/graphsage/ \
 --groundtruth ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.test.dict \
-COMMON \
+SHELLEY \
+--cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---backbone splinecnn \
---map_batch_size 8 \
---map_lr 0.01

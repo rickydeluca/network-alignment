@@ -91,14 +91,14 @@ class CommonLoss(object):
         self.contrast_loss = Distill_InfoNCE()
         self.graph_loss = Distill_QuadraticContrast()
 
-    def forward(self, args):
+    def forward(self, feature, feature_m, alpha, dynamic_temperature, dynamic_temperature_m, groundtruth):
         
-        feature = args.feature
-        feature_m = args.feature_m
-        alpha = args.alpha
-        dynamic_temperature = args.dynamic_temperature
-        dynamic_temperature_m = args.dynamic_temperature_m
-        groundtruth = args.groundtruth
+        # feature = args.feature
+        # feature_m = args.feature_m
+        # alpha = args.alpha
+        # dynamic_temperature = args.dynamic_temperature
+        # dynamic_temperature_m = args.dynamic_temperature_m
+        # groundtruth = args.groundtruth
         
         return  self.contrast_loss(feature, feature_m, alpha, dynamic_temperature, dynamic_temperature_m, groundtruth) + \
                 self.graph_loss(feature, feature_m, dynamic_temperature, dynamic_temperature_m)
