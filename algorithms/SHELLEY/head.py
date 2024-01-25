@@ -75,7 +75,7 @@ class CommonHead(nn.Module):
                 self._momentum_update()
                 embedding_m_list = self.momentum_net(data_dict)
 
-            # take batch features
+            # compute loss
             embedding_list_batch = [embedding_list[0][data_dict.source_batch], embedding_list[1][data_dict.target_batch]]
             embedding_m_list_batch = [embedding_m_list[0][data_dict.source_batch], embedding_m_list[1][data_dict.target_batch]]
 

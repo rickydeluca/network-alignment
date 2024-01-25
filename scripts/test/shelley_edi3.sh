@@ -1,6 +1,15 @@
-PD=dataspace/edi3
-PREFIX=REGAL-d05-seed1
+# modify here:
+DATA=edi3
 TRAINRATIO=0.2
+ERR=15          # edge removal ratio
+SEED=1
+
+# generate dataset
+./scripts/dataset/gen_semi.sh $DATA $TRAINRATIO $ERR $SEED
+
+# run algorithm
+PD=dataspace/${DATA}
+PREFIX=REGAL-d${ERR}-seed${SEED}
 
 python network_alignment.py \
 --source_dataset ${PD}/graphsage/ \
@@ -9,3 +18,5 @@ python network_alignment.py \
 SHELLEY \
 --cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
+--optimizer sgd \
+--eval 
