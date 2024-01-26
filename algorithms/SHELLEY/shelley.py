@@ -5,12 +5,54 @@ from easydict import EasyDict as edict
 
 import evaluation.metrics as metrics
 from algorithms.network_alignment_model import NetworkAlignmentModel
-from algorithms.SHELLEY.model.head import get_head
+from algorithms.SHELLEY.model.head import Common
+from algorithms.SHELLEY.model.backbone import GIN
 from algorithms.SHELLEY.utils.pyg_convertion import networkx_to_pyg
 from algorithms.SHELLEY.utils.split_dict import shuffle_and_split
 from algorithms.SHELLEY.model.loss import get_loss_function
 from utils.graph_utils import load_gt
 
+
+def assemble_model(head: str, backbone: str, cfg: dict, device: torch.device = 'cpu'):
+    """
+    Here the Frankenstein monster comes to life.
+
+    Args:
+        head:       The logic of the monster:
+                    how to align the node features.
+        
+        backbone:   The body of the monster:
+                    how to generate the node features.
+        
+        device:     The city in which the monster will live:
+                    CPU or GPU?
+    
+    Returns:
+        model:      The Frankenstein monster, ready to align 
+                    everything that comes to hand.
+    """
+
+    # init backbone
+    if backbone == 'gin':
+        backbone_model = GIN(in_channels=cfg.BACKBONE.IN_CHANNELS,
+                             out_channels=cfg.BACKBONE.OUT_CHANNELS,
+                             dim=cfg.BACKBONE.DIM,
+                             bias=True)
+    else:
+        raise Exception(f"[SHELLEY] Invalid backbone: {backbone}")
+    
+    # init head
+    if head == 'common':
+        model = Common(backbone=backbone_model,
+                            cfg=cfg)
+    else:
+        raise Exception(f"[SHELLEY] Invalid head: {head}.")
+    
+
+    return model
+
+
+    
 
 class SHELLEY(NetworkAlignmentModel):
     def __init__(self, source_dataset, target_dataset, args):
@@ -77,38 +119,38 @@ class SHELLEY(NetworkAlignmentModel):
         #     self.cfg.backbone.train.loss = args.backbone_loss
         
         # head
-        self.cfg.model = edict()
-        self.cfg.model.name = args.head
+        self.cfg.MODEL = edict()
+        self.cfg.MODEL.NAME = args.head
 
         if args.head == 'sigma':
             pass # TODO
         elif args.head == 'common':
-            self.cfg.model.distill = args.distill
-            self.cfg.model.momentum = args.distill_momentum
+            self.cfg.HEAD.DISTILL = args.distill
+            self.cfg.HEAD.MOMENTUM = args.distill_momentum
             # retrieve warmup_step from the `batchsize` argument if `args.warmup_step` == -1
-            self.cfg.model.warmup_step = len(self.source_train_nodes) // args.batchsize if args.warmup_step == -1 else args.warmup_step 
-            self.cfg.model.epoch_iters = args.epoch_iters
-            self.cfg.model.alpha = args.alpha
+            self.cfg.HEAD.WARMUP_STEP = len(self.source_train_nodes) // args.batchsize if args.warmup_step == -1 else args.warmup_step 
+            self.cfg.HEAD.EPOCH_ITERS = args.epoch_iters
+            self.cfg.HEAD.ALPHA = args.alpha
         elif args.head == 'stablegm':
-            self.cfg.model.feature_channel = args.feature_channel
-            self.cfg.model.sk_iter_num = args.sk_iter_num
-            self.cfg.model.sk_epsilon = args.sk_epsilon
-            self.cfg.model.sk_tau = args.sk_tau
+            self.cfg.HEAD.FEATURE_CHANNEL = args.feature_channel
+            self.cfg.HEAD.SK_ITER_NUM = args.sk_iter_num
+            self.cfg.HEAD.SK_EPSILON = args.sk_epsilon
+            self.cfg.HEAD.SK_TAU = args.sk_tau
         else:
             raise Exception(f"Invalid head: {self.head}.")
         
         # head training
-        self.cfg.model.train = edict()
-        self.cfg.model.train.optimizer = args.optimizer
-        self.cfg.model.train.momentum = args.optim_momentum 
-        self.cfg.model.train.lr = args.lr
-        self.cfg.model.train.use_scheduler = args.use_scheduler
-        self.cfg.model.train.lr_step = args.lr_step 
-        self.cfg.model.train.lr_decay = args.lr_decay
-        self.cfg.model.train.start_epoch = args.start_epoch
-        self.cfg.model.train.num_epochs = args.num_epochs
-        self.cfg.model.train.batchsize = len(self.source_train_nodes) if args.batchsize == -1 else args.batchsize # do not perform mini-batching if `args.batchsize` == -1
-        self.cfg.model.train.loss = args.loss
+        self.cfg.TRAIN = edict()
+        self.cfg.TRAIN.OPTIMIZER = args.optimizer
+        self.cfg.TRAIN.MOMENTUM = args.optim_momentum 
+        self.cfg.TRAIN.LR = args.lr
+        self.cfg.TRAIN.USE_SCHEDULER = args.use_scheduler
+        self.cfg.TRAIN.LR_STEP = args.lr_step 
+        self.cfg.TRAIN.LR_DECAY = args.lr_decay
+        self.cfg.TRAIN.START_EPOCH = args.start_epoch
+        self.cfg.TRAIN.NUM_EPOCHS = args.num_epochs
+        self.cfg.TRAIN.BATCH_SIZE = len(self.source_train_nodes) if args.batchsize == -1 else args.batchsize # do not perform mini-batching if `args.batchsize` == -1
+        self.cfg.TRAIN.LOSS = args.loss
 
     def get_alignment_matrix(self):
         if self.S is None:
@@ -125,8 +167,10 @@ class SHELLEY(NetworkAlignmentModel):
         torch.manual_seed(self.seed)            #   NOTE
         np.random.seed(self.seed)               # --------
 
-        # init head
-        self.model = get_head(name=self.cfg.model.name, cfg=self.cfg).to(self.device)
+        # init model
+        self.model = assemble_model(head=self.cfg.HEAD.NAME, 
+                                    backbone=self.cfg.BACKBONE.NAME,
+                                    device=self.device)
 
         # get the inputs for the model
         self.source_graph = networkx_to_pyg(self.source_dataset.G,
