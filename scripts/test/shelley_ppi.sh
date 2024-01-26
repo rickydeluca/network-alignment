@@ -1,7 +1,7 @@
 # modify here:
 DATA=ppi
-TRAINRATIO=0.8
-ERR=15          # edge removal ratio
+TRAINRATIO=0.2
+ERR=25         # edge removal ratio
 SEED=1
 
 # generate dataset
@@ -18,5 +18,5 @@ python network_alignment.py \
 SHELLEY \
 --cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---optimizer adam \
---eval 
+--optimizer sgd \
+--use_scheduler \

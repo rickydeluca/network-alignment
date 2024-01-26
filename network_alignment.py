@@ -215,7 +215,13 @@ def parse_args():
     parser_SHELLEY.add_argument('--epoch_iters', type=int, default=1)
     parser_SHELLEY.add_argument('--alpha', type=float, default=0.4)
 
+    parser_SHELLEY.add_argument('--feature_channel', type=int, default=1024)
+    parser_SHELLEY.add_argument('--sk_iter_num', type=int, default=1024)
+    parser_SHELLEY.add_argument('--sk_epsilon', type=float, default=1e-10)
+    parser_SHELLEY.add_argument('--sk_tau', type=float, default=0.003)
+
     parser_SHELLEY.add_argument('--optimizer', type=str, default='adam')
+    parser_SHELLEY.add_argument('--loss', type=str, default='common')
     parser_SHELLEY.add_argument('--optim_momentum', type=float, default=0.9)
     parser_SHELLEY.add_argument('--lr', type=float, default=1e-4)
     parser_SHELLEY.add_argument('--use_scheduler', action='store_true', default=False)
@@ -226,7 +232,7 @@ def parse_args():
     parser_SHELLEY.add_argument('--batchsize', type=int, default=-1)    # if '-1' do not performa minibatching
     parser_SHELLEY.add_argument('--eval', action='store_true', default=False)
 
-    
+
     return parser.parse_args()
 
 if __name__ == '__main__':

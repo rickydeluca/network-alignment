@@ -19,4 +19,3 @@ SHELLEY \
 --cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
 --optimizer sgd \
---eval 

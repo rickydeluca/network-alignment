@@ -1,9 +1,12 @@
 import random
 
-def shuffle_and_split(dictionary):
+def shuffle_and_split(dictionary, seed=None):
     """
     Shuffle and split in two halfs a dictionary.
     """
+    if seed:
+        random.seed(seed)
+        
     keys = list(dictionary.keys())
     random.shuffle(keys)
    
