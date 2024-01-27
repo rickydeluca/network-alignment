@@ -186,10 +186,10 @@ class Common(nn.Module):
         self.cfg = cfg
         self.online_net = CommonMidbone(backbone)       # init online...
         self.momentum_net = CommonMidbone(backbone)     # ...and momentum network
-        self.momentum = cfg.HEAD.MOMENTUM             # for momentum network
-        self.backbone_params = list(self.online_net.backbone_params())
-        self.warmup_step = cfg.HEAD.WARMUP_STEP       # to reach the final alpha
-        self.epoch_iters = cfg.HEAD.TRAIN.EPOCH_ITERS    
+        self.momentum = self.cfg.HEAD.MOMENTUM             # for momentum network
+        self.backbone_params = list(self.online_net.backbone_params)
+        self.warmup_step = self.cfg.HEAD.WARMUP_STEP       # to reach the final alpha
+        self.epoch_iters = self.cfg.HEAD.TRAIN.EPOCH_ITERS    
 
         self.model_pairs = [[self.online_net, self.momentum_net]]
         self.copy_params()  # initialize the momentum network

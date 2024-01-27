@@ -523,26 +523,3 @@ class ContrastiveLossWithAttention(nn.Module):
          
             
         return loss/n_sum
-
-
-def get_loss_function(name: str):
-    """
-    Return the loss function defined by the string `name`.
-    """
-
-    if name == 'common':
-        return CommonLoss()
-    elif name == 'perm_loss':
-        return PermutationLoss()
-    elif name == 'perm_loss_hung':
-        return PermutationLossHung()
-    elif name == 'hamming':
-        return HammingLoss()
-    elif name == 'cml':
-        return ContrastiveLossWithAttention()
-    elif name == 'custom':
-        print('NOTE: You are setting the loss function as \'custom\', please ensure that there is a tensor with key '
-             '\'loss\' in your model\'s returned dictionary.')
-        return None
-    else:
-        raise Exception(f"Invalid loss: {name}.")

@@ -223,10 +223,12 @@ def parse_args():
     parser_SHELLEY.add_argument('--optimizer', type=str, default='adam')
     parser_SHELLEY.add_argument('--loss', type=str, default='common')
     parser_SHELLEY.add_argument('--optim_momentum', type=float, default=0.9)
-    parser_SHELLEY.add_argument('--lr', type=float, default=1e-4)
+    parser_SHELLEY.add_argument('--lr', type=float, default=3e-4)
     parser_SHELLEY.add_argument('--use_scheduler', action='store_true', default=False)
     parser_SHELLEY.add_argument('--lr_step', type=list, nargs='+', default=[2,4,6,8,10])
     parser_SHELLEY.add_argument('--lr_decay', type=float, default=0.5)
+    parser_SHELLEY.add_argument('--separate_backbone_lr', action='store_true', default=False)
+    parser_SHELLEY.add_argument('--backbone_lr', type=float, default=2e-5)
     parser_SHELLEY.add_argument('--start_epoch', type=int, default=0)
     parser_SHELLEY.add_argument('--num_epochs', type=int, default=100)
     parser_SHELLEY.add_argument('--batchsize', type=int, default=-1)    # if '-1' do not performa minibatching
