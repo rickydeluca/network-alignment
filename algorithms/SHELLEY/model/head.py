@@ -72,100 +72,109 @@ class CommonMidbone(nn.Module):
         self.vertex_affinity = InnerProduct(backbone.num_node_features)
         self.logit_scale = torch.nn.Parameter(torch.ones([]) * np.log(1 / self.cfg.HEAD.SOFTMAX_TEMP))
         self.projection = nn.Sequential(
-            nn.Linear(backbone.num_node_features, backbone.num_node_features, bias=True),
-            nn.BatchNorm1d(backbone.num_node_features),
+            nn.Linear(backbone.num_node_features*6, backbone.num_node_features*6, bias=True),
+            nn.BatchNorm1d(backbone.num_node_features*6),
             nn.ReLU(),
-            nn.Linear(backbone.num_node_features, 256, bias=True),
+            nn.Linear(backbone.num_node_features*6, 256, bias=True),
             nn.BatchNorm1d(256),
             nn.ReLU()
         )
         
-        def forward(self, data_dict, online=True):
-            # clamp temperature to be between 0.01 and 1
-            with torch.no_grad():
-                self.logit_scale.clamp_(0, 4.6052) 
+    def forward(self, data_dict, online=True):
+        # clamp temperature to be between 0.01 and 1
+        with torch.no_grad():
+            self.logit_scale.clamp_(0, 4.6052) 
 
-            # read input dictionary
-            graphs = data_dict.pyg_graphs
-            n_points = data_dict.ns
-            batch_size = data_dict.batch_size
-            num_graphs = len(graphs)
-            orig_graph_list = []
+        # read input dictionary
+        graphs = data_dict.pyg_graphs
+        n_points = data_dict.ns
+        batch_size = data_dict.batch_size
+        num_graphs = len(graphs)
+        orig_graph_list = []
 
-            for graph, n_p in zip(graphs, n_points):
-                # extract the feature using the backbone
-                if cfg.BACKBONE.NAME == 'gin':
-                    node_features = backbone(graph)
-                
-                    # apply midbone GNN
-                    graph.x = node_features
-                    orig_graph_list.append(graph)
-
-                else:
-                    raise Exception(f"Invalid backbone: {self.cfg.BACKBONE.NAME}")
-                
-            # compute the affinity matrices between source and target graphs
-            unary_affs_list = [
-                self.vertex_affinity([self.projection(item.x) for item in g_1], [self.projection(item.x) for item in g_2])
-                for (g_1, g_2) in lexico_iter(orig_graph_list)
-            ]
-
-            # get the list of node features:
-            # [[feature_g1_src, feature_g2_src, ...], [feature_g1_tgt, feature_g2_tgt, ...]]
-            if self.cfg.MODEL.TRAIN.LOSS == 'distill_qc':   
-                # prepare aligned node features if computing constrastive loss 
-                keypoint_number_list = []   # number of keypoints in each graph pair
-                node_feature_list = []      # node features for computing contrastive loss
-
-                node_feature_graph1 = torch.zeros(
-                    [batch_size, data_dict['gt_perm_mat'].shape[1], node_features.shape[1]],
-                    device=node_features.device
-                )
-                node_feature_graph2 = torch.zeros(
-                    [batch_size, data_dict['gt_perm_mat'].shape[2], node_features.shape[1]],
-                    device=node_features.device
-                )
-
-                # count available keypoints in number list
-                for index in range(batch_size):
-                    node_feature_graph1[index, :orig_graph_list[0][index].x.shape[0]] = orig_graph_list[0][index].x
-                    node_feature_graph2[index, :orig_graph_list[1][index].x.shape[0]] = orig_graph_list[1][index].x
-                    keypoint_number_list.append(torch.sum(data_dict['gt_perm_mat'][index]))
-                number = int(sum(keypoint_number_list))  # calculate the number of correspondence
-
-                # pre-align the keypoints for further computing the contrastive loss
-                node_feature_graph2 = torch.bmm(data_dict['gt_perm_mat'], node_feature_graph2)
-                final_node_feature_graph1 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
-                final_node_feature_graph2 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
-                count = 0
-                for index in range(batch_size):
-                    final_node_feature_graph1[count: count + int(keypoint_number_list[index])] \
-                        = node_feature_graph1[index, :int(keypoint_number_list[index])]
-                    final_node_feature_graph2[count: count + int(keypoint_number_list[index])] \
-                        = node_feature_graph2[index, :int(keypoint_number_list[index])]
-                    count += int(keypoint_number_list[index])
-                node_feature_list.append(self.projection(final_node_feature_graph1))
-                node_feature_list.append(self.projection(final_node_feature_graph2))
+        for graph, n_p in zip(graphs, n_points):
+            # extract the feature using the backbone
+            if self.cfg.BACKBONE.NAME == 'gin':
+                node_features = self.backbone(graph)
             
+                # apply midbone GNN
+                graph.x = node_features
+                orig_graph_list.append(graph)
+
             else:
-                # TODO: if we are using another loss function
-                # we don't need to prealign the node features
-                raise Exception(f"[CommonMidbone] Invalid loss function: {self.cfg.MODEL.TRAIN.LOSS}")
-            
-            # produce output
-            if online is False:
-                # output of the momentum network
-                return node_feature_list
-            elif online is True:
-                # output of the online network
-                x_list = []
-                for unary_affs, (idx1, idx2) in zip(unary_affs_list, lexico_iter(range(num_graphs))):
-                    Kp = torch.stack(pad_tensor(unary_affs), dim=0)
+                raise Exception(f"Invalid backbone: {self.cfg.BACKBONE.NAME}")
+        
+        # print('orig_graph_list: ', orig_graph_list)                 # DEBUG
+        # print('after lexico_iter: ', lexico_iter(orig_graph_list))  # DEBUG
+        # for (g1, g2) in lexico_iter(orig_graph_list):               # DEBUG
+        #     print('g1', g1)
+        #     print('g2', g2)
+        #     for item in g1:
+        #         print('item g1: ', item)
+        # exit()                                                      # DEBUG
 
-                    # conduct hungarian matching to get the permutation matrix for evaluation
-                    x = hungarian(Kp,n_points[idx1], n_points[idx2])
-                    x_list.append(x)
-                return node_feature_list, x_list
+        # compute the affinity matrices between source and target graphs
+        unary_affs_list = [
+            self.vertex_affinity([self.projection(item.x) for item in [g_1]], [self.projection(item.x) for item in [g_2]])
+            for (g_1, g_2) in lexico_iter(orig_graph_list)
+        ]
+
+        # get the list of node features:
+        # [[feature_g1_src, feature_g2_src, ...], [feature_g1_tgt, feature_g2_tgt, ...]]
+        if self.cfg.TRAIN.LOSS_FUNC == 'distill_qc':   
+            # prepare aligned node features if computing constrastive loss 
+            keypoint_number_list = []   # number of keypoints in each graph pair
+            node_feature_list = []      # node features for computing contrastive loss
+
+            node_feature_graph1 = torch.zeros(
+                [batch_size, data_dict['gt_perm_mat'].shape[1], node_features.shape[1]],
+                device=node_features.device
+            )
+            node_feature_graph2 = torch.zeros(
+                [batch_size, data_dict['gt_perm_mat'].shape[2], node_features.shape[1]],
+                device=node_features.device
+            )
+
+            # count available keypoints in number list
+            for index in range(batch_size):
+                node_feature_graph1[index, :orig_graph_list[0][index].x.shape[0]] = orig_graph_list[0][index].x
+                node_feature_graph2[index, :orig_graph_list[1][index].x.shape[0]] = orig_graph_list[1][index].x
+                keypoint_number_list.append(torch.sum(data_dict['gt_perm_mat'][index]))
+            number = int(sum(keypoint_number_list))  # calculate the number of correspondence
+
+            # pre-align the keypoints for further computing the contrastive loss
+            node_feature_graph2 = torch.bmm(data_dict['gt_perm_mat'], node_feature_graph2)
+            final_node_feature_graph1 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
+            final_node_feature_graph2 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
+            count = 0
+            for index in range(batch_size):
+                final_node_feature_graph1[count: count + int(keypoint_number_list[index])] \
+                    = node_feature_graph1[index, :int(keypoint_number_list[index])]
+                final_node_feature_graph2[count: count + int(keypoint_number_list[index])] \
+                    = node_feature_graph2[index, :int(keypoint_number_list[index])]
+                count += int(keypoint_number_list[index])
+            node_feature_list.append(self.projection(final_node_feature_graph1))
+            node_feature_list.append(self.projection(final_node_feature_graph2))
+        
+        else:
+            # TODO: if we are using another loss function
+            # we don't need to prealign the node features
+            raise Exception(f"[CommonMidbone] Invalid loss function: {self.cfg.MODEL.TRAIN.LOSS}")
+        
+        # produce output
+        if online is False:
+            # output of the momentum network
+            return node_feature_list
+        elif online is True:
+            # output of the online network
+            x_list = []
+            for unary_affs, (idx1, idx2) in zip(unary_affs_list, lexico_iter(range(num_graphs))):
+                Kp = torch.stack(pad_tensor(unary_affs), dim=0)
+
+                # conduct hungarian matching to get the permutation matrix for evaluation
+                x = hungarian(Kp,n_points[idx1], n_points[idx2])
+                x_list.append(x)
+            return node_feature_list, x_list
 
 
 class Common(nn.Module):
@@ -184,12 +193,12 @@ class Common(nn.Module):
 
         # model parameters
         self.cfg = cfg
-        self.online_net = CommonMidbone(backbone)       # init online...
-        self.momentum_net = CommonMidbone(backbone)     # ...and momentum network
+        self.online_net = CommonMidbone(backbone, self.cfg)       # init online...
+        self.momentum_net = CommonMidbone(backbone, self.cfg)     # ...and momentum network
         self.momentum = self.cfg.HEAD.MOMENTUM             # for momentum network
         self.backbone_params = list(self.online_net.backbone_params)
         self.warmup_step = self.cfg.HEAD.WARMUP_STEP       # to reach the final alpha
-        self.epoch_iters = self.cfg.HEAD.TRAIN.EPOCH_ITERS    
+        self.epoch_iters = self.cfg.TRAIN.EPOCH_ITERS    
 
         self.model_pairs = [[self.online_net, self.momentum_net]]
         self.copy_params()  # initialize the momentum network

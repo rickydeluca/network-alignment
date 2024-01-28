@@ -14,7 +14,7 @@ class GIN(torch.nn.Module):
         act = Tanh()
         eps = 0.0
         train_eps = False
-        self.num_node_features = out_channels * 6
+        self.num_node_features = out_channels
 
         self.bn_in = torch.nn.BatchNorm1d(in_channels)
 

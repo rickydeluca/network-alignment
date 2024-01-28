@@ -211,7 +211,7 @@ def parse_args():
     parser_SHELLEY.add_argument('--head', type=str, default='common')
     parser_SHELLEY.add_argument('--distill', action='store_true', default=True)
     parser_SHELLEY.add_argument('--distill_momentum', type=float, default=0.995)
-    parser_SHELLEY.add_argument('--warmup_step', type=int, default=-1)  # if '-1' compute it using the `batchsize` argument
+    parser_SHELLEY.add_argument('--warmup_step', type=int, default=1)  # if '-1' compute it using the `batchsize` argument
     parser_SHELLEY.add_argument('--epoch_iters', type=int, default=1)
     parser_SHELLEY.add_argument('--alpha', type=float, default=0.4)
 
@@ -221,7 +221,7 @@ def parse_args():
     parser_SHELLEY.add_argument('--sk_tau', type=float, default=0.003)
 
     parser_SHELLEY.add_argument('--optimizer', type=str, default='adam')
-    parser_SHELLEY.add_argument('--loss', type=str, default='common')
+    parser_SHELLEY.add_argument('--loss_func', type=str, default='distill_qc')
     parser_SHELLEY.add_argument('--optim_momentum', type=float, default=0.9)
     parser_SHELLEY.add_argument('--lr', type=float, default=3e-4)
     parser_SHELLEY.add_argument('--use_scheduler', action='store_true', default=False)
