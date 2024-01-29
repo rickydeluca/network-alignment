@@ -1,3 +1,5 @@
+import random
+
 import networkx as nx
 import numpy as np
 import torch
@@ -84,56 +86,72 @@ def create_pyg_graph(edge_list, metric_name=None, undirected=True):
     return Data(x=x, edge_index=edge_index)
 
 
-def generate_random_permutation(
-    graph, num_copies: int, p_remove: float = 0.0, p_add: float = 0.0
-):
+def add_and_remove_edges(G, p_new_connection, p_remove_connection):    
     """
-    Generates `num_copies` copies of a graph with random permutations of nodes, edges removed, and new edges added.
+    For each node, add a new connection to a random other node,
+    with prob p_new_connection, remove a connection,
+    with prob p_remove_connection.
 
-    Args:
-        graph (torch_geometric.data.Data): The original PyTorch Geometric graph.
-        num_copies (int): The number of random permutations to generate.
-        p_remove (float): Probability of removing an edge.
-        p_add (float): Probability of adding a new edge.
+    Returns the new graph (a copy) with added/removed edges and the ground truth matrix
+    """               
+    # Create a deep copy of the graph to avoid modifying the source graph
+    new_G = nx.Graph(G)
 
-    Returns:
-        tuple: A tuple containing:
-            - list: A list of PyTorch Geometric graphs representing the m random permutations.
-            - list: A list of ground truth matrices corresponding to the mappings between nodes in the original and permuted graphs.
-    """
-    graphs = []
-    groundtruth_matrices = []
+    new_edges = []    
+    rem_edges = []  
 
-    for _ in range(num_copies):
-        permuted_nodes = np.random.permutation(graph.num_nodes)
-        permuted_graph = graph.clone()
-        permuted_graph.x[:, 0] = torch.tensor(permuted_nodes, dtype=torch.float)
+    for i, node in enumerate(new_G.nodes()):    
+        # Find the other nodes this one is connected to    
+        connected = [to for (fr, to) in new_G.edges(node)]    
+        # And find the remainder of nodes, which are candidates for new edges   
+        unconnected = [n for n in new_G.nodes() if n not in connected]    
 
-        edge_index = to_networkx(permuted_graph).edges()
-        edges_to_remove = [edge for edge in edge_index if np.random.rand() < p_remove]
-        edges_to_add = [
-            (i, j)
-            for i in range(graph.num_nodes)
-            for j in range(i + 1, graph.num_nodes)
-            if np.random.rand() < p_add
-        ]
+        # Probabilistically add a random edge    
+        if len(unconnected):  # Only try if a new edge is possible    
+            if random.random() < p_new_connection:    
+                new = random.choice(unconnected)    
+                new_G.add_edge(node, new)    
+                print("\tnew edge:\t {} -- {}".format(node, new))    
+                new_edges.append((node, new))    
+                # Book-keeping, in case both add and remove done in the same cycle  
+                unconnected.remove(new)    
+                connected.append(new)
 
-        permuted_graph.edge_index = (
-            torch.tensor(
-                [edge for edge in edge_index if edge not in edges_to_remove]
-                + edges_to_add,
-                dtype=torch.long,
-            ).t().contiguous()
-        )
+        # Probabilistically remove a random edge    
+        if len(connected):  # Only try if an edge exists to remove    
+            if random.random() < p_remove_connection:    
+                remove = random.choice(connected)    
+                new_G.remove_edge(node, remove)    
+                print("\tedge removed:\t {} -- {}".format(node, remove))    
+                rem_edges.append((node, remove))    
+                # Book-keeping, in case lists are important later    
+                connected.remove(remove)    
+                unconnected.append(remove)    
 
-        graphs.append(permuted_graph)
+    return new_G, new_edges, rem_edges
 
-        # Create ground truth matrix
-        groundtruth_matrix = torch.zeros(
-            (graph.num_nodes, graph.num_nodes), dtype=torch.long
-        )
-        for i, node in enumerate(permuted_nodes):
-            groundtruth_matrix[i, node] = 1
-        groundtruth_matrices.append(groundtruth_matrix)
 
-    return graphs, groundtruth_matrices
+# Test functions
+if __name__ == '__main__':
+    # Create an initial graph
+    G_src = nx.erdos_renyi_graph(20, 0.15, seed=42)
+    print("Source graph:")
+    print(G_src)
+
+    # Add/remove connections
+    p_new_connection = 0.1
+    p_remove_connection = 0.1
+
+    G_tgt, new_edges, rem_edges = add_and_remove_edges(
+        G_src, p_new_connection, p_remove_connection
+    )
+
+    print("\nAdded Edges:")
+    print(new_edges)
+    print("\nRemoved Edges:")
+    print(rem_edges)
+    print("New graph:")
+    print(G_tgt)
+
+    # Shuffle ID and index of nodes in target graph
+

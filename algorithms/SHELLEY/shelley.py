@@ -4,14 +4,16 @@ import numpy as np
 import torch
 import torch.optim as optim
 from easydict import EasyDict as edict
+from torch_geometric.loader import DataLoader
 
 from algorithms.network_alignment_model import NetworkAlignmentModel
 from algorithms.SHELLEY.model.backbone import GIN
-from algorithms.SHELLEY.model.head import Common
+from algorithms.SHELLEY.model.head import Common, StableGM
 from algorithms.SHELLEY.model.loss import ContrastiveLossWithAttention
+from algorithms.SHELLEY.utils.evaluation_metric import matching_accuracy
 from algorithms.SHELLEY.utils.networkx_to_pyg import networkx_to_pyg
 from algorithms.SHELLEY.utils.split_dict import shuffle_and_split
-from algorithms.SHELLEY.utils.evaluation_metric import matching_accuracy
+
 # from algorithms.SHELLEY.utils.data_to_cuda import data_to_cuda
 from utils.graph_utils import load_gt
 
@@ -47,6 +49,8 @@ def assemble_model(head: str, backbone: str, cfg: dict, device: torch.device = '
     # init head
     if head == 'common':
         model = Common(backbone=backbone_model, cfg=cfg).to(device)
+    elif head == 'stablegm':
+        model = StableGM(backbone=backbone_model, cfg=cfg).to(device)
     else:
         raise Exception(f"[SHELLEY] Invalid head: {head}.")
     
@@ -191,15 +195,16 @@ class SHELLEY(NetworkAlignmentModel):
         print('source_graph:', self.source_graph)
         print('target_graph:', self.target_graph)
 
-        inputs = edict()
-        inputs.pyg_graphs = [self.source_graph, self.target_graph, self.source_graph, self.target_graph]
-        inputs.ns = [self.source_graph.num_nodes, self.source_graph.num_nodes, self.source_graph.num_nodes, self.source_graph.num_nodes]
-        inputs.gt_perm_mat = torch.stack((self.gt_train_mat.to(self.device), self.gt_train_mat.to(self.device)))
-        inputs.batch_size = 2
-
+        # DEBUG: generate a testing dataset
         self.dataloader = edict()
-        self.dataloader.train = [inputs]
+        input_batch = edict()
+        input_batch.batch_size = 2
+        input_batch.pyg_graphs = DataLoader([self.source_graph, self.target_graph], batch_size=input_batch.batch_size)
+        input_batch.ns = [self.source_graph.num_nodes, self.target_graph.num_nodes]
+        input_batch.gt_perm_mat = torch.stack((self.gt_train_mat, self.gt_train_mat))
+        self.dataloader.train = [input_batch, input_batch, input_batch]
         
+
         # train model
         if not self.skip_train:
             self.train_eval_model()
@@ -304,7 +309,7 @@ class SHELLEY(NetworkAlignmentModel):
                 if iter_num >= self.cfg.TRAIN.EPOCH_ITERS:
                     break
                 
-                # move data to correct device
+                # TODO: move data to correct device
                 # if self.model.device != torch.device('cpu'):
                 #     inputs.pyg_graphs = [g.to(self.device) for g in inputs.pyg_graphs]
 

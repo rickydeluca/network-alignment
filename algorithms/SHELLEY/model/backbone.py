@@ -40,7 +40,15 @@ class GIN(torch.nn.Module):
 
         self.fc1 = Linear(dim, out_channels, bias=False)
 
-    def forward(self, graph):
+    def forward(self, graph_batch):
+        # NOTE: modified to handle batch of graphs
+        orig_graphs = graph_batch.to_data_list()
+        res = [self.convolution(graph) for graph in orig_graphs]
+        orig_graphs = [out[0] for out in res]
+        node_features = torch.stack(([out[1] for out in res]), dim=0)
+        return orig_graphs, node_features
+    
+    def convolution(self, graph):
         X = graph.x
         X_importance = graph.x_importance
         edge_index = graph.edge_index
@@ -58,7 +66,9 @@ class GIN(torch.nn.Module):
 
         x = torch.cat(xs[1:], dim=-1)
 
-        return x
+        # re-assign the convolved features to the input graph
+        graph.x = x
+        return (graph, x)
     
 
 def get_backbone(name: str, cfg: dict):
