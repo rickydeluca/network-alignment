@@ -351,7 +351,7 @@ class Distill_InfoNCE(nn.Module):
         super(Distill_InfoNCE, self).__init__()
 
     def forward(self, feature: Tensor, feature_m: Tensor, alpha: float, dynamic_temperature: Tensor,
-                dynamic_temperature_m: Tensor, groundtruth:Tensor) -> Tensor:
+                dynamic_temperature_m: Tensor) -> Tensor:
 
         graph1_feat = F.normalize(feature[0], dim=-1)
         graph2_feat = F.normalize(feature[1], dim=-1)
@@ -379,9 +379,8 @@ class Distill_InfoNCE(nn.Module):
             sim_2to1_m = F.softmax(sim_2to1_m, dim=1)
 
             # online similiarity
-            # sim_targets = torch.zeros(sim_1to2_m.size()).to(graph1_feat.device)
-            # sim_targets.fill_diagonal_(1)
-            sim_targets = groundtruth     # NOTE: is it correct?
+            sim_targets = torch.zeros(sim_1to2_m.size()).to(graph1_feat.device)
+            sim_targets.fill_diagonal_(1)
 
             # generate pseudo contrastive labels
             sim_1to2_targets = alpha * sim_1to2_m + (1 - alpha) * sim_targets

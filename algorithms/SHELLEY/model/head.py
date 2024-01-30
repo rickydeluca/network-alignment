@@ -92,30 +92,44 @@ class CommonMidbone(nn.Module):
         orig_graph_list = []
 
         # DEBUG
-        print("[HEAD] pyg_graphs: ", graphs)
+        # print("[HEAD] pyg_graphs: ", graphs)
 
         for graph, n_p in zip(graphs, n_points):
             # DEBUG:
-            print('graph:', graph)
+            # print('[HEAD] graph:', graph)
+
             # extract the feature using the backbone
             if self.cfg.BACKBONE.NAME == 'gin':
                 # NOTE: modified to handle batch graphs
-                # node_features = self.backbone(graph)
-                # apply midbone GNN
-                # graph.x = node_features
-                # orig_graph_list.append(graph)
-                orig_graph, node_features = self.backbone(graph)
-                orig_graph_list.append(orig_graph)
+                graph, _ = self.backbone(graph)     # discar the old node features
+                node_features = graph.x
+
+                # unroll the graph in the batch
+                orig_graphs = graph.to_data_list()
+                orig_graph_list.append(orig_graphs)
+
+                # DEBUG:
+                # print('\n[HEAD] new graph: ', graph)
+                # print('\n[HEAD] orig_graphs: ', orig_graphs)
+                # print('\n[HEAD] orig_graph_list: ', orig_graph_list)
 
             else:
                 raise Exception(f"Invalid backbone: {self.cfg.BACKBONE.NAME}")
 
+        # DEBUG:
+        # for (g1, g2) in lexico_iter(orig_graph_list):
+        #     print('g1:', g1)
+        #     print('g2:', g2)
 
         # compute the affinity matrices between source and target graphs
         unary_affs_list = [
             self.vertex_affinity([self.projection(item.x) for item in g_1], [self.projection(item.x) for item in g_2])
             for (g_1, g_2) in lexico_iter(orig_graph_list)
         ]
+
+        # DEBUG:
+        # print('\n[HEAD] unary_affs_list: ', unary_affs_list)
+        # exit()
 
         # get the list of node features:
         # [[feature_g1_src, feature_g2_src, ...], [feature_g1_tgt, feature_g2_tgt, ...]]
@@ -191,12 +205,12 @@ class Common(nn.Module):
 
         # model parameters
         self.cfg = cfg
-        self.online_net = CommonMidbone(backbone, self.cfg)       # init online...
-        self.momentum_net = CommonMidbone(backbone, self.cfg)     # ...and momentum network
-        self.momentum = self.cfg.HEAD.MOMENTUM             # for momentum network
-        self.backbone_params = list(self.online_net.backbone_params)
-        self.warmup_step = self.cfg.HEAD.WARMUP_STEP       # to reach the final alpha
-        self.epoch_iters = self.cfg.TRAIN.EPOCH_ITERS    
+        self.online_net = CommonMidbone(backbone, self.cfg)             # init online...
+        self.momentum_net = CommonMidbone(backbone, self.cfg)           # ...and momentum network
+        self.momentum = self.cfg.HEAD.MOMENTUM                          # for momentum network
+        self.backbone_params = list(self.online_net.backbone_params)    # used if case of separate lr
+        self.warmup_step = self.cfg.HEAD.WARMUP_STEP                    # to reach the final alpha
+        self.epoch_iters = self.cfg.TRAIN.EPOCH_ITERS
 
         self.model_pairs = [[self.online_net, self.momentum_net]]
         self.copy_params()  # initialize the momentum network
@@ -213,7 +227,7 @@ class Common(nn.Module):
 
         if training is True:
             # the momentum network is only used for training
-            assert self.cfg.MODEL.DISTILL is True
+            assert self.cfg.HEAD.DISTILL is True
 
             # output of the momentum network
             with torch.no_grad():

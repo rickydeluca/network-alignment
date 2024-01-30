@@ -233,6 +233,7 @@ def parse_args():
     parser_SHELLEY.add_argument('--num_epochs', type=int, default=100)
     parser_SHELLEY.add_argument('--batchsize', type=int, default=-1)    # if '-1' do not performa minibatching
     parser_SHELLEY.add_argument('--eval', action='store_true', default=False)
+    parser_SHELLEY.add_argument('--statistic_step', type=int, default=1)
 
 
     return parser.parse_args()

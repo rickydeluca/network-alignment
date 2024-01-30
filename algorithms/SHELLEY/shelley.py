@@ -160,6 +160,7 @@ class SHELLEY(NetworkAlignmentModel):
         self.cfg.TRAIN.EPOCH_ITERS = args.epoch_iters
         self.cfg.TRAIN.BATCH_SIZE = len(self.source_train_nodes) if args.batchsize == -1 else args.batchsize # do not perform mini-batching if `args.batchsize` == -1
         self.cfg.TRAIN.LOSS_FUNC = args.loss_func
+        self.cfg.TRAIN.STATISTIC_STEP = args.statistic_step 
 
     def get_alignment_matrix(self):
         if self.S is None:
@@ -189,21 +190,12 @@ class SHELLEY(NetworkAlignmentModel):
                                             gen_node_feats=True,
                                             ref_node_metric='degree').to(self.device)
         
-        # DEBUG: add feat importance
+        # set feature importance
         self.source_graph.x_importance = torch.ones([self.source_graph.num_nodes, 1]).to(self.device)
         self.target_graph.x_importance = torch.ones([self.target_graph.num_nodes, 1]).to(self.device)
-        print('source_graph:', self.source_graph)
-        print('target_graph:', self.target_graph)
 
-        # DEBUG: generate a testing dataset
-        self.dataloader = edict()
-        input_batch = edict()
-        input_batch.batch_size = 2
-        input_batch.pyg_graphs = DataLoader([self.source_graph, self.target_graph], batch_size=input_batch.batch_size)
-        input_batch.ns = [self.source_graph.num_nodes, self.target_graph.num_nodes]
-        input_batch.gt_perm_mat = torch.stack((self.gt_train_mat, self.gt_train_mat))
-        self.dataloader.train = [input_batch, input_batch, input_batch]
-        
+        # TODO: define dataloader
+        self.dataloader = DataLoader()
 
         # train model
         if not self.skip_train:
@@ -334,7 +326,7 @@ class SHELLEY(NetworkAlignmentModel):
                         raise ValueError(f"[SHELLEY] Unsupperted loss function: {self.cfg.TRAIN.LOSS_FUNC}")
 
                     # compute accuracy
-                    acc = matching_accuracy(outputs['perm_mat'], outputs['gt_perm_mat'], outputs['ns'], idx=0)
+                    acc = matching_accuracy(outputs['perm_mat'], outputs['gt_perm_mat'], outputs['ns'], idx=0)[0]
 
                     # backward + optimize
                     loss.backward()
@@ -351,10 +343,10 @@ class SHELLEY(NetworkAlignmentModel):
 
                     if iter_num % self.cfg.TRAIN.STATISTIC_STEP == 0:
                         running_speed = self.cfg.TRAIN.STATISTIC_STEP * batch_num / (time.time() - running_since)
-                        print(f'Epoch: {epoch:<4}, ' \
-                              f'Iteration: {iter_num:<4}, ' \
-                              f'{running_speed:>4.2f}sample/s, '\
-                              f'Loss: {running_loss / self.cfg.TRAIN.STATISTIC_STEP / batch_num:<8.4f}, '\
+                        print(f'Epoch: {epoch:<4}' \
+                              f'Iteration: {iter_num:<4}' \
+                              f'{running_speed:>4.2f}sample/s'\
+                              f'Loss: {running_loss / self.cfg.TRAIN.STATISTIC_STEP / batch_num:<8.4f}'\
                               f'Accuracy: {running_acc / self.cfg.TRAIN.STATISTIC_STEP / batch_num:<8.4f}')
 
                         running_loss = 0.0
@@ -364,7 +356,7 @@ class SHELLEY(NetworkAlignmentModel):
             # epoch statistics
             epoch_loss = epoch_loss / self.cfg.TRAIN.EPOCH_ITERS / batch_num
             epoch_acc = epoch_acc / self.cfg.TRAIN.EPOCH_ITERS / batch_num
-            print(f"[TRAINING] Epoch {epoch+1:<4}, Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.4f}")
+            print(f"[TRAINING] Epoch {epoch+1:<4} Loss: {epoch_loss:.4f} Accuracy: {epoch_acc:.4f}")
 
             # === EVALUATION ===
             
