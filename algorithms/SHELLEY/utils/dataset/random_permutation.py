@@ -95,22 +95,22 @@ def add_and_remove_edges(G, p_new_connection, p_remove_connection):
     Returns the new graph (a copy) with added/removed edges and the ground truth matrix
     """               
     # Create a deep copy of the graph to avoid modifying the source graph
-    new_G = nx.Graph(G)
+    G_synth = nx.Graph(G)
 
     new_edges = []    
     rem_edges = []  
 
-    for i, node in enumerate(new_G.nodes()):    
+    for i, node in enumerate(G_synth.nodes()):    
         # Find the other nodes this one is connected to    
-        connected = [to for (fr, to) in new_G.edges(node)]    
+        connected = [to for (fr, to) in G_synth.edges(node)]    
         # And find the remainder of nodes, which are candidates for new edges   
-        unconnected = [n for n in new_G.nodes() if n not in connected]    
+        unconnected = [n for n in G_synth.nodes() if n not in connected]    
 
         # Probabilistically add a random edge    
         if len(unconnected):  # Only try if a new edge is possible    
             if random.random() < p_new_connection:    
                 new = random.choice(unconnected)    
-                new_G.add_edge(node, new)    
+                G_synth.add_edge(node, new)    
                 print("\tnew edge:\t {} -- {}".format(node, new))    
                 new_edges.append((node, new))    
                 # Book-keeping, in case both add and remove done in the same cycle  
@@ -121,14 +121,13 @@ def add_and_remove_edges(G, p_new_connection, p_remove_connection):
         if len(connected):  # Only try if an edge exists to remove    
             if random.random() < p_remove_connection:    
                 remove = random.choice(connected)    
-                new_G.remove_edge(node, remove)    
-                print("\tedge removed:\t {} -- {}".format(node, remove))    
+                G_synth.remove_edge(node, remove)       
                 rem_edges.append((node, remove))    
                 # Book-keeping, in case lists are important later    
                 connected.remove(remove)    
                 unconnected.append(remove)    
 
-    return new_G, new_edges, rem_edges
+    return G_synth
 
 
 # Test functions
