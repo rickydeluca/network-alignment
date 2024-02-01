@@ -202,7 +202,11 @@ def parse_args():
     parser_SHELLEY.add_argument('--skip_train', action='store_true', default=False)
     parser_SHELLEY.add_argument('--seed', type=int, default=42)
     parser_SHELLEY.add_argument('--cuda', action="store_true", default=False)
-    
+
+    parser_SHELLEY.add_argument('--root_dir', type=str, default='dataspace/ppi')
+    parser_SHELLEY.add_argument('--p_add', type=float, default=0.1)
+    parser_SHELLEY.add_argument('--p_rm', type=float, default=0.1)
+
     parser_SHELLEY.add_argument('--backbone', type=str, default='gin')
     parser_SHELLEY.add_argument('--node_feature_dim', type=int, default=1)
     parser_SHELLEY.add_argument('--dim', type=int, default=256)
@@ -212,7 +216,7 @@ def parse_args():
     parser_SHELLEY.add_argument('--distill', action='store_true', default=True)
     parser_SHELLEY.add_argument('--distill_momentum', type=float, default=0.995)
     parser_SHELLEY.add_argument('--warmup_step', type=int, default=1)  # if '-1' compute it using the `batchsize` argument
-    parser_SHELLEY.add_argument('--epoch_iters', type=int, default=1)
+    parser_SHELLEY.add_argument('--epoch_iters', type=int, default=2000)
     parser_SHELLEY.add_argument('--alpha', type=float, default=0.4)
 
     parser_SHELLEY.add_argument('--feature_channel', type=int, default=1024)
@@ -220,6 +224,7 @@ def parse_args():
     parser_SHELLEY.add_argument('--sk_epsilon', type=float, default=1e-10)
     parser_SHELLEY.add_argument('--sk_tau', type=float, default=0.003)
 
+    parser_SHELLEY.add_argument('--self_supervised', action='store_true', default=False)
     parser_SHELLEY.add_argument('--optimizer', type=str, default='adam')
     parser_SHELLEY.add_argument('--loss_func', type=str, default='distill_qc')
     parser_SHELLEY.add_argument('--optim_momentum', type=float, default=0.9)
@@ -231,10 +236,16 @@ def parse_args():
     parser_SHELLEY.add_argument('--backbone_lr', type=float, default=2e-5)
     parser_SHELLEY.add_argument('--start_epoch', type=int, default=0)
     parser_SHELLEY.add_argument('--num_epochs', type=int, default=100)
-    parser_SHELLEY.add_argument('--batchsize', type=int, default=-1)    # if '-1' do not performa minibatching
-    parser_SHELLEY.add_argument('--eval', action='store_true', default=False)
-    parser_SHELLEY.add_argument('--statistic_step', type=int, default=1)
-
+    parser_SHELLEY.add_argument('--batchsize', type=int, default=2)    # if '-1' do not performa minibatching
+    parser_SHELLEY.add_argument('--eval', action='store_true', default=True)
+    parser_SHELLEY.add_argument('--statistic_step', type=int, default=4)
+    parser_SHELLEY.add_argument('--early_stopping', action='store_true', default=True)
+    parser_SHELLEY.add_argument('--patience', type=int, default=5)
+    parser_SHELLEY.add_argument('--checkpoints', type=str, default='algorithms/SHELLEY/checkpoints')
+    
+    parser_SHELLEY.add_argument('--validate', action='store_true', default=True)
+    parser_SHELLEY.add_argument('--val_iters', type=int, default=100)
+    parser_SHELLEY.add_argument('--test_iters', type=int, default=100)
 
     return parser.parse_args()
 

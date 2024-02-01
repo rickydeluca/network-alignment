@@ -14,7 +14,7 @@ import torch
 import torch.nn.functional as F
 import torch_geometric as pyg
 from easydict import EasyDict as edict
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, random_split
 from torch_geometric.utils.convert import from_networkx
 
 from input.dataset import Dataset as BaseDataset
@@ -26,25 +26,22 @@ cfg = edict()   # Global variable that substitue a configuration file
 class GMSemiSyntheticDataset(Dataset):
     def __init__(self,
                  root_dir,
-                 p_add_connection=0.0,
-                 p_remove_connection=0.0,
-                 mode='train',
-                 fix_seed=True,
-                 seed=42):
+                 p_add=0.0,
+                 p_rm=0.0,
+                 self_supervised=False,
+                 len=100):
         
         super(GMSemiSyntheticDataset, self).__init__()
 
         self.source_dataset = BaseDataset(root_dir + '/graphsage', verbose=False)   
-        self.p_add_connection = p_add_connection
-        self.p_remove_connection = p_remove_connection
-        self.mode = mode
-        self.fix_seed = fix_seed
-        self.seed = seed
+        self.p_add = p_add          # If -1, use all the probabilities
+        self.p_rm = p_rm            # Same as before
+        self.self_supervised = self_supervised
 
         # Take only the target graphs with the required probabilities.
         self.targets_dir = os.path.join(root_dir, 'targets')
-        p_add_str = f'add{p_add_connection:.2f}'.replace('0.', '')
-        p_rm_str = f'rm{p_add_connection:.2f}'.replace('0.', '')
+        p_add_str = f'add{p_add:.2f}'.replace('0.', '') if p_add >= 0 else ''
+        p_rm_str = f'rm{p_rm:.2f}'.replace('0.', '') if p_rm >= 0 else ''
         prob_substrings = [p_add_str, p_rm_str]
         self.target_files = sorted(self.filter_files_with_substrings(self.targets_dir, prob_substrings))
 
@@ -69,7 +66,7 @@ class GMSemiSyntheticDataset(Dataset):
         return matching_files
         
     @staticmethod
-    def synthetic_random_clone(dataset, p_add_connection=0.0, p_remove_connection=0.0, seed=42):
+    def synthetic_random_clone(dataset, p_add=0.0, p_rm=0.0, seed=42):
         np.random.seed = seed
         
         H = dataset.G.copy()
@@ -88,14 +85,14 @@ class GMSemiSyntheticDataset(Dataset):
         scale_factor = (len(connected) / len(unconnected)) 
 
         # Remove edges with probability.
-        mask_remove = np.random.uniform(0,1, size=(len(connected))) < p_remove_connection
+        mask_remove = np.random.uniform(0,1, size=(len(connected))) < p_rm
         edges_remove = [(idx2id[x[0]], idx2id[x[1]]) for idx, x in enumerate(connected)
                         if mask_remove[idx] is True]
         # count_rm = mask_remove.sum()
         H.remove_edges_from(edges_remove)
 
         # Add edges with probability.
-        mask_add = np.random.uniform(0,1, size=(len(unconnected))) < p_add_connection * scale_factor
+        mask_add = np.random.uniform(0,1, size=(len(unconnected))) < p_add * scale_factor
         edges_add = [(idx2id[x[0]], idx2id[x[1]]) for idx, x in enumerate(unconnected)
                     if mask_add[idx] is True]
         # count_add = mask_add.sum()
@@ -154,6 +151,9 @@ class GMSemiSyntheticDataset(Dataset):
         pyg_graph = from_networkx(G,
                                   group_node_attrs=node_metrics,
                                   group_edge_attrs=edge_metrics)
+
+        # Set feature importance (used in GIN backbone)
+        pyg_graph.x_importance = torch.ones([pyg_graph.num_nodes, 1])
             
         return pyg_graph
 
@@ -173,17 +173,20 @@ class GMSemiSyntheticDataset(Dataset):
 
         # Get groundtruth alignment matrix.
         gt_path = os.path.join(self.targets_dir, self.target_files[idx], 'dictionaries', 'groundtruth')
-        groundtruth = torch.from_numpy(load_gt(gt_path, self.source_dataset.id2idx, target_dataset.id2idx, 'matrix'))
+        groundtruth = torch.from_numpy(load_gt(gt_path,
+                                               self.source_dataset.id2idx,
+                                               target_dataset.id2idx,
+                                               'matrix')).to(torch.float)
 
         # Generate random synthetic target graph.
         # target_graph = self.synthetic_random_clone(self.source_dataset,
-        #                                            p_add_connection=self.p_add_connection,
-        #                                            p_remove_connection=self.p_remove_connection,
+        #                                            p_add=self.p_add,
+        #                                            p_rm=self.p_rm,
         #                                            seed=self.seed)
 
         # Convert to pyg graphs.
-        source_pyg = self.to_pyg_graph(source_graph, node_metric='degree', edge_metric='none', use_weight=True)
-        target_pyg = self.to_pyg_graph(target_graph, node_metric='degree', edge_metric='none', use_weight=True)
+        source_pyg = self.to_pyg_graph(source_graph, node_metric='assortativity', edge_metric='none', use_weight=True)
+        target_pyg = self.to_pyg_graph(target_graph, node_metric='assortativity', edge_metric='none', use_weight=True)
 
         # Get the number of graph nodes.
         n_src = source_graph.number_of_nodes()
@@ -303,12 +306,19 @@ if __name__ == '__main__':
     # Test semi synt graph matching dataset.
     data_dir = 'dataspace/ppi'
     gm_dataset = GMSemiSyntheticDataset(root_dir=data_dir,
-                                        p_add_connection=0,
-                                        p_remove_connection=0,
-                                        mode='train')
+                                        p_add=0.1,
+                                        p_rm=0.1)
     
-    dataloader = get_dataloader(gm_dataset, batch_size=4)
-    
+    print("Full dataset:", len(gm_dataset))
+
+    # Split it.
+    train, val, test = random_split(gm_dataset, (0.7, 0.15, 0.15))
+    print('Train:', len(train))
+    print('Val:', len(val))
+    print('Test', len(test))
+
+    # Test DataLoader.
+    dataloader = get_dataloader(val, batch_size=4)
     for idx, ret in enumerate(dataloader):
         print(f'Iter: {idx}')
         print(ret)

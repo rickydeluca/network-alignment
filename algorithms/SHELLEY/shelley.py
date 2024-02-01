@@ -4,17 +4,17 @@ import numpy as np
 import torch
 import torch.optim as optim
 from easydict import EasyDict as edict
-from torch_geometric.loader import DataLoader
+from torch.utils.data import random_split
 
 from algorithms.network_alignment_model import NetworkAlignmentModel
 from algorithms.SHELLEY.model.backbone import GIN
 from algorithms.SHELLEY.model.head import Common, StableGM
 from algorithms.SHELLEY.model.loss import ContrastiveLossWithAttention
+from algorithms.SHELLEY.utils.data_to_cuda import data_to_cuda
+from algorithms.SHELLEY.utils.dataset.data_loader import GMSemiSyntheticDataset, get_dataloader
 from algorithms.SHELLEY.utils.evaluation_metric import matching_accuracy
 from algorithms.SHELLEY.utils.networkx_to_pyg import networkx_to_pyg
 from algorithms.SHELLEY.utils.split_dict import shuffle_and_split
-
-# from algorithms.SHELLEY.utils.data_to_cuda import data_to_cuda
 from utils.graph_utils import load_gt
 
 
@@ -37,7 +37,7 @@ def assemble_model(head: str, backbone: str, cfg: dict, device: torch.device = '
                     everything that comes to hand.
     """
 
-    # init backbone
+    # Init Backbone.
     if backbone == 'gin':
         backbone_model = GIN(in_channels=cfg.BACKBONE.NODE_FEATURE_DIM,
                              out_channels=cfg.BACKBONE.OUT_CHANNELS,
@@ -46,7 +46,7 @@ def assemble_model(head: str, backbone: str, cfg: dict, device: torch.device = '
     else:
         raise Exception(f"[SHELLEY] Invalid backbone: {backbone}")
     
-    # init head
+    # Init Head.
     if head == 'common':
         model = Common(backbone=backbone_model, cfg=cfg).to(device)
     elif head == 'stablegm':
@@ -67,7 +67,6 @@ class SHELLEY(NetworkAlignmentModel):
         self.train_eval_dict = args.train_dict
         self.use_pretrained = args.use_pretrained
         self.skip_train = args.skip_train
-        self.eval = args.eval
         self.seed = args.seed
         self.gt_mat = torch.from_numpy(load_gt(self.train_eval_dict, source_dataset.id2idx, target_dataset.id2idx, 'matrix'))
         self.S = None
@@ -92,13 +91,20 @@ class SHELLEY(NetworkAlignmentModel):
             self.gt_train_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k,v in gt_train.items()}
             self.source_train_nodes = np.array(list(self.gt_train_dict.keys()))
 
-        # set device
+        # Set device:
         self.device = torch.device('cuda:0' if (torch.cuda.is_available() and args.cuda is True) else 'cpu')
 
-        # models configuration
+        # Models configurations:
         self.cfg = edict()
 
-        # backbone
+        # Data:
+        self.cfg.DATA = edict()
+        self.cfg.DATA.ROOT_DIR = args.root_dir 
+        self.cfg.DATA.NAME = args.root_dir.split('/')[-1]
+        self.cfg.DATA.P_ADD = args.p_add 
+        self.cfg.DATA.P_RM = args.p_rm
+
+        # Backbone:
         self.cfg.BACKBONE = edict()
         self.cfg.BACKBONE.NAME = args.backbone
 
@@ -123,7 +129,7 @@ class SHELLEY(NetworkAlignmentModel):
         #     self.cfg.BACKBONE.TRAIN.BATCH_SIZE = args.backbone_batchsize # do not perform mini-batching if `args.batchsize` == -1
         #     self.cfg.BACKBONE.TRAIN.LOSS = args.backbone_loss
         
-        # head
+        # Head:
         self.cfg.HEAD = edict()
         self.cfg.HEAD.NAME = args.head
 
@@ -145,8 +151,9 @@ class SHELLEY(NetworkAlignmentModel):
         else:
             raise Exception(f"Invalid head: {self.head}.")
         
-        # head training
+        # Training
         self.cfg.TRAIN = edict()
+        self.cfg.TRAIN.SELF_SUPERVISED = args.self_supervised  # if True do not use the target graphs in the dataset, but generate a random graph 'on the fly'
         self.cfg.TRAIN.OPTIMIZER = args.optimizer
         self.cfg.TRAIN.MOMENTUM = args.optim_momentum 
         self.cfg.TRAIN.LR = args.lr
@@ -161,6 +168,17 @@ class SHELLEY(NetworkAlignmentModel):
         self.cfg.TRAIN.BATCH_SIZE = len(self.source_train_nodes) if args.batchsize == -1 else args.batchsize # do not perform mini-batching if `args.batchsize` == -1
         self.cfg.TRAIN.LOSS_FUNC = args.loss_func
         self.cfg.TRAIN.STATISTIC_STEP = args.statistic_step 
+        self.cfg.TRAIN.EARLY_STOPPING = args.early_stopping 
+        self.cfg.TRAIN.PATIENCE = args.patience
+
+        # Evaluation
+        self.cfg.EVAL = edict()
+        self.cfg.EVAL.VALIDATE = args.validate      # Validation during training
+        self.cfg.EVAL.VAL_ITERS = args.val_iters
+        self.cfg.EVAL.TEST_ITERS = args.test_iters
+
+        # Checkpoints
+        self.cfg.CHECKPOINTS = args.checkpoints
 
     def get_alignment_matrix(self):
         if self.S is None:
@@ -172,44 +190,47 @@ class SHELLEY(NetworkAlignmentModel):
         if self.use_pretrained:
             raise Exception("Not implemented yet.") # TODO
         
-        # reproducibility               # NOTE
+        # Reproducibility               # NOTE
         torch.manual_seed(self.seed)
         np.random.seed(self.seed)
 
-        # init model
+        # Init model
         self.model = assemble_model(head=self.cfg.HEAD.NAME, 
                                     backbone=self.cfg.BACKBONE.NAME,
                                     cfg=self.cfg,
                                     device=self.device)
 
-        # get the inputs for the model
-        self.source_graph = networkx_to_pyg(self.source_dataset.G,
-                                            gen_node_feats=True,
-                                            ref_node_metric='degree').to(self.device)
-        self.target_graph = networkx_to_pyg(self.target_dataset.G,
-                                            gen_node_feats=True,
-                                            ref_node_metric='degree').to(self.device)
+        # Get dataset
+        full_dataset = GMSemiSyntheticDataset(root_dir=self.cfg.DATA.ROOT_DIR,
+                                              p_add=self.cfg.DATA.P_ADD,
+                                              p_rm=self.cfg.DATA.P_RM,
+                                              self_supervised=self.cfg.TRAIN.SELF_SUPERVISED)
         
-        # set feature importance
-        self.source_graph.x_importance = torch.ones([self.source_graph.num_nodes, 1]).to(self.device)
-        self.target_graph.x_importance = torch.ones([self.target_graph.num_nodes, 1]).to(self.device)
 
-        # TODO: define dataloader
-        self.dataloader = DataLoader()
+        train, val, test = random_split(full_dataset, (0.7, 0.15, 0.15))
+        dataset = {'train': train, 'val': val, 'test': test}
+        
+        self.dataloader = {x: get_dataloader(dataset[x],
+                                            shuffle=True,
+                                            fix_seed=(x != 'train'),
+                                            batch_size=self.cfg.TRAIN.BATCH_SIZE,
+                                            seed=self.seed,
+                                            num_workers=4)
+                        for x in ('train', 'val', 'test')}
 
-        # train model
+        # Train model.
         if not self.skip_train:
             self.train_eval_model()
         
-        # get final alignment
-        self.model.eval()
+        # # Get final alignment.
+        # self.model.eval()
 
-        inputs = edict()
-        inputs.pyg_graphs = [self.source_graph, self.target_graph]
-        inputs.ns = [self.source_graph.num_nodes, self.target_graph.num_nodes]
+        # inputs = edict()
+        # inputs.pyg_graphs = [self.source_graph, self.target_graph]
+        # inputs.ns = [self.source_graph.num_nodes, self.target_graph.num_nodes]
 
-        outputs = self.model(inputs, training=False)
-        self.S = outputs.perm_mat.detach().cpu().numpy()
+        # outputs = self.model(inputs, training=False)
+        # self.S = outputs.perm_mat.detach().cpu().numpy()
 
         return self.S
 
@@ -223,17 +244,17 @@ class SHELLEY(NetworkAlignmentModel):
         # Configure training
         # ------------------
 
-        # loss function
+        # Loss function.
         if self.cfg.TRAIN.LOSS_FUNC.lower() == 'cml':
-            criterion = ContrastiveLossWithAttention()
+            self.criterion = ContrastiveLossWithAttention()
         elif self.cfg.TRAIN.LOSS_FUNC.lower() == 'distill_qc':
             print("[SHELLEY] You selected 'distill_quadratic' as loss function which is defined within the model,"
                   "please ensure there is a tensor with key 'loss' in your model\'s returned dictionary.")
-            criterion = None
+            self.criterion = None
         else:
             raise Exception(f"[SHELLEY] Invalid loss function: {self.cfg.TRAIN.LOSS_FUNC.lower()}.")
         
-        # get model parameters
+        # Get model parameters.
         if self.cfg.TRAIN.SEPARATE_BACKBONE_LR:
             backbone_ids = [id(item) for item in self.model.backbone_params]
             other_params = [param for param in self.model.parameters() if id(param) not in backbone_ids]
@@ -246,18 +267,18 @@ class SHELLEY(NetworkAlignmentModel):
         else:
             model_params = self.model.parameters()
         
-        # optimizer
+        # Optimizer.
         if self.cfg.TRAIN.OPTIMIZER.lower() == 'sgd':
-            optimizer = optim.SGD(model_params, lr=self.cfg.TRAIN.LR, momentum=self.cfg.TRAIN.MOMENTUM, nesterov=True)
+            self.optimizer = optim.SGD(model_params, lr=self.cfg.TRAIN.LR, momentum=self.cfg.TRAIN.MOMENTUM, nesterov=True)
         elif self.cfg.TRAIN.OPTIMIZER.lower() == 'adam':
-            optimizer = optim.Adam(model_params, lr=self.cfg.TRAIN.LR)
+            self.optimizer = optim.Adam(model_params, lr=self.cfg.TRAIN.LR)
         else:
             raise ValueError(f"Unknown optimizer: {self.cfg.TRAIN.OPTIMIZER}.")
         
-        # scheduler
+        # Scheduler.
         if self.cfg.TRAIN.USE_SCHEDULER:
-            scheduler = optim.lr_scheduler.MultiStepLR(
-                optimizer,
+            self.scheduler = optim.lr_scheduler.MultiStepLR(
+                self.optimizer,
                 milestones=self.cfg.TRAIN.LR_STEP,
                 gamma=self.cfg.TRAIN.LR_DECAY,
                 last_epoch=self.cfg.TRAIN.START_EPOCH - 1
@@ -271,110 +292,178 @@ class SHELLEY(NetworkAlignmentModel):
         start_epoch = self.cfg.TRAIN.START_EPOCH
         num_epochs = self.cfg.TRAIN.NUM_EPOCHS
 
+        # Early stopping parameters
+        best_val_acc = 0.0
+        best_model_path = f'{self.cfg.CHECKPOINTS}/{self.cfg.BACKBONE.NAME}_{self.cfg.HEAD.NAME}_{self.cfg.DATA.NAME}_add{self.cfg.DATA.P_ADD}_rm{self.cfg.DATA.P_RM}.pth'
+        no_improvement_count = 0
+
         for epoch in range(start_epoch, num_epochs):
-            # reset seed after evaluation per epoch
+            # Reset seed after evaluation per epoch
             torch.manual_seed(self.seed + epoch + 1)
 
-            # TODO: get dataloader
-
-            print(f"Epoch {epoch+1}/{num_epochs}")
+            print(f"\nEpoch {epoch+1}/{num_epochs}")
             print("-" * 10)
 
-            # === TRAINING ===
+            # Train model
+            train_loss, train_acc = self.train_one_epoch(epoch)
+            print(f"[TRAINING] Epoch {epoch+1:<4} Loss: {train_loss:.4f} Accuracy: {train_acc:.4f}")
 
-            # set model to training mode
-            self.model.train()
-            # self.model.module.trainings = True  # NOTE
+            # Validation    
+            if self.cfg.EVAL.VALIDATE:  
+                val_acc = self.eval_model(mode='val')
 
-            print('lr = ' + ', '.join(['{:.2e}'.format(x['lr']) for x in optimizer.param_groups]))
+                # Check for improvement
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    no_improvement_count = 0
 
-            epoch_loss = 0.0
-            epoch_acc = 0.0
-            running_loss = 0.0
-            running_acc = 0.0
-            running_since = time.time()
-            iter_num = 0
+                    # Save best model
+                    torch.save(self.model.state_dict(), best_model_path)
 
-            # iterate over data
-            for inputs in self.dataloader['train']:
+                    print(f"New best model saved with validation accuracy: {val_acc:.4f}")
+                else:
+                    no_improvement_count += 1
 
-                if iter_num >= self.cfg.TRAIN.EPOCH_ITERS:
+                # Early stopping
+                if self.cfg.TRAIN.EARLY_STOPPING and no_improvement_count >= self.cfg.TRAIN.PATIENCE:
+                    print(f"Early stopping after {epoch+1} epochs with no improvement in validation loss.")
                     break
-                
-                # TODO: move data to correct device
-                # if self.model.device != torch.device('cpu'):
-                #     inputs.pyg_graphs = [g.to(self.device) for g in inputs.pyg_graphs]
 
-                iter_num += 1
-
-                # zero the gradient parameters
-                optimizer.zero_grad()
-
-                with torch.set_grad_enabled(True):
-                    # forward step
-                    if 'common' in self.cfg.HEAD.NAME: # COMMON use the iter number to control the warmup temperature
-                        outputs = self.model(inputs, training=True, iter_num=iter_num, epoch=epoch)
-                    else:
-                        outputs = self.model(inputs)
-
-                    # compute loss
-                    if self.cfg.TRAIN.LOSS_FUNC == 'cml':
-                        loss = criterion(outputs['ds_mat'], outputs['gt_perm_mat'], outputs['perm_mat'], *outputs['ns'], beta=0.1)
-                    elif self.cfg.TRAIN.LOSS_FUNC == 'distill_qc':
-                        loss = torch.sum(outputs['loss'])
-                    else:
-                        raise ValueError(f"[SHELLEY] Unsupperted loss function: {self.cfg.TRAIN.LOSS_FUNC}")
-
-                    # compute accuracy
-                    acc = matching_accuracy(outputs['perm_mat'], outputs['gt_perm_mat'], outputs['ns'], idx=0)[0]
-
-                    # backward + optimize
-                    loss.backward()
-                    optimizer.step()
-
-                    batch_num = inputs['batch_size']
-
-                    # statistics
-                    running_loss += loss.item() * batch_num
-                    running_acc += acc.item() * batch_num
-                    epoch_loss += loss.item() * batch_num
-                    epoch_acc += acc.item() * batch_num
-                    
-
-                    if iter_num % self.cfg.TRAIN.STATISTIC_STEP == 0:
-                        running_speed = self.cfg.TRAIN.STATISTIC_STEP * batch_num / (time.time() - running_since)
-                        print(f'Epoch: {epoch:<4}' \
-                              f'Iteration: {iter_num:<4}' \
-                              f'{running_speed:>4.2f}sample/s'\
-                              f'Loss: {running_loss / self.cfg.TRAIN.STATISTIC_STEP / batch_num:<8.4f}'\
-                              f'Accuracy: {running_acc / self.cfg.TRAIN.STATISTIC_STEP / batch_num:<8.4f}')
-
-                        running_loss = 0.0
-                        running_acc = 0.0
-                        running_since = time.time()
-        
-            # epoch statistics
-            epoch_loss = epoch_loss / self.cfg.TRAIN.EPOCH_ITERS / batch_num
-            epoch_acc = epoch_acc / self.cfg.TRAIN.EPOCH_ITERS / batch_num
-            print(f"[TRAINING] Epoch {epoch+1:<4} Loss: {epoch_loss:.4f} Accuracy: {epoch_acc:.4f}")
-
-            # === EVALUATION ===
-            
-            if self.eval:
-                # TODO
-                raise Exception("[SHELLEY] Evaluation is not implemented yet!")
-                
-            # update scheduler
+            # Update scheduler
             if self.cfg.TRAIN.USE_SCHEDULER:
-                scheduler.step()
+                self.scheduler.step()
         
-        # compute elapsed training time
+        # Compute elapsed training time.
         time_elapsed = time.time() - since 
         hours = time_elapsed // 3600
         minutes = (time_elapsed // 60) % 60
         seconds = time_elapsed % 60
         print(f"Training complete in {hours:.0f}h {minutes:0f}m {seconds:0f}s")
 
-        # TODO: load best model parameters
+        # Load best model parameters
+        self.model.load_state_dict(torch.load(best_model_path))
+        self.best_model_path = best_model_path
 
         return
+    
+
+    def train_one_epoch(self, epoch):
+        # Set model to training mode.
+        self.model.train()
+
+        print('lr = ' + ', '.join(['{:.2e}'.format(x['lr']) for x in self.optimizer.param_groups]))
+
+        epoch_loss = 0.0
+        epoch_acc = 0.0
+        running_loss = 0.0
+        running_acc = 0.0
+        running_since = time.time()
+        iter_num = 0
+
+        # Iterate over data
+        for inputs in self.dataloader['train']:
+
+            if iter_num >= self.cfg.TRAIN.EPOCH_ITERS:
+                break
+            
+            # Move data to correct device
+            if self.model.device != torch.device('cpu'):
+                inputs = data_to_cuda(inputs)
+            
+            iter_num += 1
+
+            # Zero the gradient parameters
+            self.optimizer.zero_grad()
+
+            with torch.set_grad_enabled(True):
+                # Forward step
+                if 'common' in self.cfg.HEAD.NAME: # COMMON use the iter number to control the warmup temperature
+                    outputs = self.model(inputs, training=True, iter_num=iter_num, epoch=epoch)
+                else:
+                    outputs = self.model(inputs)
+
+                # Compute loss
+                if self.cfg.TRAIN.LOSS_FUNC == 'cml':
+                    loss = self.criterion(outputs['ds_mat'], outputs['gt_perm_mat'], outputs['perm_mat'], *outputs['ns'], beta=0.1)
+                elif self.cfg.TRAIN.LOSS_FUNC == 'distill_qc':
+                    loss = torch.sum(outputs['loss'])
+                else:
+                    raise ValueError(f"[SHELLEY] Unsupperted loss function: {self.cfg.TRAIN.LOSS_FUNC}")
+
+                # Compute accuracy
+                acc = matching_accuracy(outputs['perm_mat'], outputs['gt_perm_mat'], outputs['ns'], idx=0)[0]
+
+                # Backward + Optimize:
+                loss.backward()
+                self.optimizer.step()
+
+                batch_num = inputs['batch_size']
+
+                # Batching statistics
+                running_loss += loss.item() * batch_num
+                running_acc += acc.item() * batch_num
+                epoch_loss += loss.item() * batch_num
+                epoch_acc += acc.item() * batch_num
+                
+
+                if iter_num % self.cfg.TRAIN.STATISTIC_STEP == 0:
+                    running_speed = self.cfg.TRAIN.STATISTIC_STEP * batch_num / (time.time() - running_since)
+                    print(f'Epoch: {epoch+1:<4}' \
+                            f'Iteration: {iter_num:<4}' \
+                            f'{running_speed:<4.2f}sample/s'\
+                            f'Loss: {running_loss / self.cfg.TRAIN.STATISTIC_STEP / batch_num:<8.4f}'\
+                            f'Accuracy: {running_acc / self.cfg.TRAIN.STATISTIC_STEP / batch_num:<8.4f}')
+
+                    running_loss = 0.0
+                    running_acc = 0.0
+                    running_since = time.time()
+    
+        # Epoch statistics
+        epoch_loss = epoch_loss / iter_num / batch_num
+        epoch_acc = epoch_acc / iter_num / batch_num
+
+        return epoch_loss, epoch_acc
+    
+
+    def eval_model(self, mode='val'):
+        """
+        Evaluate the model on validation or test set and return the corresponding metrics.
+        """
+        self.model.eval()        
+        dataloader = self.dataloader[mode]  # 'val' or 'test'
+
+        eval_acc = 0.0
+        eval_since = time.time()
+        eval_iter_num = 0
+
+        # Iterate over data
+        with torch.no_grad():
+            for eval_inputs in dataloader:
+                if eval_iter_num >= self.cfg.EVAL.VAL_ITERS and mode == 'val':
+                    break
+                elif eval_iter_num >= self.cfg.EVAL.TEST_ITERS and mode == 'test':
+                    break
+
+                # Move data to correct device
+                if self.model.device != torch.device('cpu'):
+                    eval_inputs = data_to_cuda(eval_inputs)
+
+                eval_iter_num += 1
+
+                # Forward step
+                eval_outputs = self.model(eval_inputs)
+
+                # Compute accuracy
+                eval_acc += matching_accuracy(eval_outputs['perm_mat'], eval_outputs['gt_perm_mat'], eval_outputs['ns'], idx=0)[0].item()
+
+        # Average accuracy
+        eval_acc = eval_acc / eval_iter_num
+
+        # Print evaluation statistics
+        print(f"[{mode.upper()}] Accuracy: {eval_acc:.4f}")
+
+        # Print time taken for evaluation
+        eval_time_elapsed = time.time() - eval_since
+        print(f"Evaluation complete in {eval_time_elapsed:.0f}s")
+
+        return eval_acc

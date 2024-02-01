@@ -18,5 +18,9 @@ python network_alignment.py \
 SHELLEY \
 --cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---optimizer sgd \
---use_scheduler \
+--root_dir dataspace/ppi \
+--p_add 0.0 \
+--p_rm 0.1 \
+--train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
+--optimizer adam \
+--use_scheduler

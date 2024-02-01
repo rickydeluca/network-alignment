@@ -1,6 +1,6 @@
 import torch
-from algorithms.SHELLEY.utils.sparse_torch.csx_matrix import CSRMatrix3d, CSCMatrix3d
 import torch_geometric as pyg
+
 
 def data_to_cuda(inputs):
     """
@@ -20,7 +20,7 @@ def data_to_cuda(inputs):
             inputs[key] = data_to_cuda(inputs[key])
     elif type(inputs) in [str, int, float]:
         inputs = inputs
-    elif type(inputs) in [torch.Tensor, CSRMatrix3d, CSCMatrix3d]:
+    elif type(inputs) in [torch.Tensor]:
         inputs = inputs.cuda()
     else:
         try:

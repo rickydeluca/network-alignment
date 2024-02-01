@@ -43,15 +43,15 @@ class GIN(torch.nn.Module):
     def forward(self, graph):
         old_features = graph.x
         result = self._forward(graph)
-        graph.x = result    # assign new features
+        graph.x = result    # Assign new features
         return graph, old_features
     
     def _forward(self, graph):
-        X = graph.x
+        X = graph.x.to(torch.float)
         X_importance = graph.x_importance
         edge_index = graph.edge_index
 
-        # forward step
+        # Forward step
         x = self.bn_in(X * X_importance)  # NOTE
         xs = [x]
 

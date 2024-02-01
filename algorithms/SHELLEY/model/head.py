@@ -80,63 +80,41 @@ class CommonMidbone(nn.Module):
         )
         
     def forward(self, data_dict, online=True):
-        # clamp temperature to be between 0.01 and 1
+        # Clamp temperature to be between 0.01 and 1
         with torch.no_grad():
             self.logit_scale.clamp_(0, 4.6052) 
 
-        # read input dictionary
-        graphs = data_dict.pyg_graphs
-        n_points = data_dict.ns
-        batch_size = data_dict.batch_size
-        num_graphs = len(graphs)
+        # Read input dictionary
+        graphs = data_dict['pyg_graphs']
+        n_points = data_dict['ns']
+        batch_size = data_dict['batch_size']
+        num_graphs = data_dict['num_graphs']
         orig_graph_list = []
 
-        # DEBUG
-        # print("[HEAD] pyg_graphs: ", graphs)
-
-        for graph, n_p in zip(graphs, n_points):
-            # DEBUG:
-            # print('[HEAD] graph:', graph)
-
-            # extract the feature using the backbone
+        for _graph, n_p in zip(graphs, n_points):
+            # Extract the feature using the backbone
             if self.cfg.BACKBONE.NAME == 'gin':
-                # NOTE: modified to handle batch graphs
-                graph, _ = self.backbone(graph)     # discar the old node features
+                graph = _graph.clone()
+                graph, _ = self.backbone(graph) # Discar old node features
                 node_features = graph.x
 
-                # unroll the graph in the batch
+                # Unroll the graph in the batch
                 orig_graphs = graph.to_data_list()
                 orig_graph_list.append(orig_graphs)
-
-                # DEBUG:
-                # print('\n[HEAD] new graph: ', graph)
-                # print('\n[HEAD] orig_graphs: ', orig_graphs)
-                # print('\n[HEAD] orig_graph_list: ', orig_graph_list)
 
             else:
                 raise Exception(f"Invalid backbone: {self.cfg.BACKBONE.NAME}")
 
-        # DEBUG:
-        # for (g1, g2) in lexico_iter(orig_graph_list):
-        #     print('g1:', g1)
-        #     print('g2:', g2)
-
-        # compute the affinity matrices between source and target graphs
+        # Compute the affinity matrices between source and target graphs
         unary_affs_list = [
             self.vertex_affinity([self.projection(item.x) for item in g_1], [self.projection(item.x) for item in g_2])
             for (g_1, g_2) in lexico_iter(orig_graph_list)
         ]
 
-        # DEBUG:
-        # print('\n[HEAD] unary_affs_list: ', unary_affs_list)
-        # exit()
-
-        # get the list of node features:
-        # [[feature_g1_src, feature_g2_src, ...], [feature_g1_tgt, feature_g2_tgt, ...]]
         if self.cfg.TRAIN.LOSS_FUNC == 'distill_qc':   
-            # prepare aligned node features if computing constrastive loss 
-            keypoint_number_list = []   # number of keypoints in each graph pair
-            node_feature_list = []      # node features for computing contrastive loss
+            # Prepare aligned node features if computing constrastive loss 
+            keypoint_number_list = []   # Number of keypoints in each graph pair
+            node_feature_list = []      # Node features for computing contrastive loss
 
             node_feature_graph1 = torch.zeros(
                 [batch_size, data_dict['gt_perm_mat'].shape[1], node_features.shape[1]],
@@ -147,14 +125,14 @@ class CommonMidbone(nn.Module):
                 device=node_features.device
             )
 
-            # count available keypoints in number list
+            # Count available keypoints in number list
             for index in range(batch_size):
                 node_feature_graph1[index, :orig_graph_list[0][index].x.shape[0]] = orig_graph_list[0][index].x
                 node_feature_graph2[index, :orig_graph_list[1][index].x.shape[0]] = orig_graph_list[1][index].x
                 keypoint_number_list.append(torch.sum(data_dict['gt_perm_mat'][index]))
-            number = int(sum(keypoint_number_list))  # calculate the number of correspondence
+            number = int(sum(keypoint_number_list))  # Calculate the number of correspondence
 
-            # pre-align the keypoints for further computing the contrastive loss
+            # Pre-align the keypoints for further computing the contrastive loss
             node_feature_graph2 = torch.bmm(data_dict['gt_perm_mat'], node_feature_graph2)
             final_node_feature_graph1 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
             final_node_feature_graph2 = torch.zeros([number, node_features.shape[1]], device=node_features.device)
@@ -173,17 +151,17 @@ class CommonMidbone(nn.Module):
             # we don't need to prealign the node features
             raise Exception(f"[CommonMidbone] Invalid loss function: {self.cfg.MODEL.TRAIN.LOSS}")
         
-        # produce output
+        # Produce output
         if online is False:
-            # output of the momentum network
+            # Output of the momentum network
             return node_feature_list
         elif online is True:
-            # output of the online network
+            # Output of the online network
             x_list = []
             for unary_affs, (idx1, idx2) in zip(unary_affs_list, lexico_iter(range(num_graphs))):
                 Kp = torch.stack(pad_tensor(unary_affs), dim=0)
 
-                # conduct hungarian matching to get the permutation matrix for evaluation
+                # Conduct hungarian matching to get the permutation matrix for evaluation
                 x = hungarian(Kp,n_points[idx1], n_points[idx2])
                 x_list.append(x)
             return node_feature_list, x_list
@@ -203,38 +181,38 @@ class Common(nn.Module):
         """
         super(Common, self).__init__()
 
-        # model parameters
+        # Model parameters
         self.cfg = cfg
-        self.online_net = CommonMidbone(backbone, self.cfg)             # init online...
+        self.online_net = CommonMidbone(backbone, self.cfg)             # Init online...
         self.momentum_net = CommonMidbone(backbone, self.cfg)           # ...and momentum network
-        self.momentum = self.cfg.HEAD.MOMENTUM                          # for momentum network
-        self.backbone_params = list(self.online_net.backbone_params)    # used if case of separate lr
-        self.warmup_step = self.cfg.HEAD.WARMUP_STEP                    # to reach the final alpha
+        self.momentum = self.cfg.HEAD.MOMENTUM                          # For momentum network
+        self.backbone_params = list(self.online_net.backbone_params)    # Used if case of separate lr
+        self.warmup_step = self.cfg.HEAD.WARMUP_STEP                    # To reach the final alpha
         self.epoch_iters = self.cfg.TRAIN.EPOCH_ITERS
 
         self.model_pairs = [[self.online_net, self.momentum_net]]
-        self.copy_params()  # initialize the momentum network
+        self.copy_params()  # Initialize the momentum network
 
     def forward(self, data_dict, training=False, iter_num=0, epoch=0):
-        # compute the distillation weight `alpha`
+        # Compute the distillation weight `alpha`
         if epoch * self.epoch_iters + iter_num >= self.warmup_step:
             alpha = self.cfg.HEAD.ALPHA
         else:
             alpha = self.cfg.HEAD.ALPHA * min(1, (epoch * self.epoch_iters + iter_num) / self.warmup_step)
         
-        # output of the online network
+        # Output of the online network
         node_feature_list, x_list = self.online_net(data_dict)
 
         if training is True:
-            # the momentum network is only used for training
+            # The momentum network is only used for training
             assert self.cfg.HEAD.DISTILL is True
 
-            # output of the momentum network
+            # Output of the momentum network
             with torch.no_grad():
                 self._momentum_update()
                 node_feature_m_list = self.momentum_net(data_dict, online=False)
 
-            # loss function
+            # Loss function
             if self.cfg.TRAIN.LOSS_FUNC == 'distill_qc':
                 contrastloss = Distill_InfoNCE()
                 loss = contrastloss(node_feature_list, node_feature_m_list, alpha,
@@ -255,8 +233,7 @@ class Common(nn.Module):
                 raise Exception(f"[COMMON] Invalid loss function: {self.cfg.TRAIN.LOSS_FUNC}")
         
         else:
-            # if no training,
-            # directly output the result
+            # If no training, directly output the result
             data_dict.update({
                 'perm_mat': x_list[0],
                 'ds_mat': None
