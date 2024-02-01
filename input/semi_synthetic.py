@@ -1,11 +1,15 @@
-import networkx as nx
 import json
-from networkx.readwrite import json_graph
-import random
 import os
+import random
+
+import networkx as nx
 import numpy as np
+from networkx.readwrite import json_graph
+
 from input.dataset import Dataset
-from utils.random_clone import random_clone_synthetic
+from utils.random_clone import (random_clone_synthetic,
+                                random_clone_synthetic_shelley)
+
 
 class SemiSynthetic():
     """
@@ -79,6 +83,17 @@ class SemiSynthetic():
         print("===============")
         dataset = Dataset(self.networkx_dir)
         G = random_clone_synthetic(dataset, p_new_connection, p_remove_connection, self.seed)
+        self._save_graph(G, self.output_dir1, p_change_feats)
+
+    def generate_random_clone_synthetic_shelley(self, p_add=None, p_rm=None, p_change_feats=None):
+        print("===============")
+        dataset = Dataset(self.networkx_dir)
+        G = random_clone_synthetic_shelley(dataset,
+                                           p_add_connection=p_add,
+                                           p_remove_connection=p_rm,
+                                           seed=self.seed,
+                                           weighted=self.weighted)
+        
         self._save_graph(G, self.output_dir1, p_change_feats)
 
     def generate_REGAL_synthetic(self):

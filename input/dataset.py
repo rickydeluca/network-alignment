@@ -18,7 +18,7 @@ class Dataset:
     - data_dir: Data directory which contains files mentioned above.
     """
 
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, verbose=True):
         self.data_dir = data_dir
         self._load_G()
         self._load_id2idx()
@@ -26,9 +26,11 @@ class Dataset:
         #   raise Exception("Error in id2idx") 
         self._load_features()
         self.load_edge_features()
-        print("Dataset info:")
-        print("- Nodes: ", len(self.G.nodes()))
-        print("- Edges: ", len(self.G.edges()))
+        
+        if verbose:
+            print("Dataset info:")
+            print("- Nodes: ", len(self.G.nodes()))
+            print("- Edges: ", len(self.G.edges()))
 
     def _load_G(self):
         G_data = json.load(open(os.path.join(self.data_dir, "G.json")))
