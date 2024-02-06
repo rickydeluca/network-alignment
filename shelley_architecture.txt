@@ -1,0 +1,16 @@
+SHELLEY ARCHITECTURE
+--------------------
+
+
+BACKBONE: How the node embeddings are generated?
+    
+    - GIN:  Starting from a one dimensional node feature (degree), generates an embedding of size 'dim' * 'num_layers', passing the node features in a model composed by alternating a linear layer with a Graph Convolutional Layer. Actually it cannot pretrained. In fact it is trained during the alignment.
+    
+    - PALE: Generate the embeddings of the nodes forcing two embeddings to be similar (using the dot product) if the share an edge. Can be pretrained. In this way is it possible to separate the embedding generation and the mapping. We can refine their parameters in the alignment part by using a separate LR.
+    
+
+HEAD: How the so generated embeddings are mapped from source to target nodes?
+    
+    - COMMON:
+    
+    - StableGM:  

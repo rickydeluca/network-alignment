@@ -11,7 +11,8 @@ from algorithms.SHELLEY.model.backbone import GIN
 from algorithms.SHELLEY.model.head import Common, StableGM
 from algorithms.SHELLEY.model.loss import ContrastiveLossWithAttention
 from algorithms.SHELLEY.utils.data_to_cuda import data_to_cuda
-from algorithms.SHELLEY.utils.dataset.data_loader import GMSemiSyntheticDataset, get_dataloader
+from algorithms.SHELLEY.utils.dataset.data_loader import (
+    GMSemiSyntheticDataset, get_dataloader)
 from algorithms.SHELLEY.utils.evaluation_metric import matching_accuracy
 from algorithms.SHELLEY.utils.networkx_to_pyg import networkx_to_pyg
 from algorithms.SHELLEY.utils.split_dict import shuffle_and_split
@@ -37,16 +38,20 @@ def assemble_model(head: str, backbone: str, cfg: dict, device: torch.device = '
                     everything that comes to hand.
     """
 
-    # Init Backbone.
+    # Backbone
     if backbone == 'gin':
-        backbone_model = GIN(in_channels=cfg.BACKBONE.NODE_FEATURE_DIM,
+        backbone_model = GIN(in_channels=cfg.BACKBONE.IN_CHANNELS,
                              out_channels=cfg.BACKBONE.OUT_CHANNELS,
                              dim=cfg.BACKBONE.DIM,
                              bias=True).to(device)
+    # elif backbone == 'pale_linear':
+    #     backbone_model = PaleLinear(in_channels=cfg.BACKBONE.IN_CHANNELS,
+    #                          out_channels=cfg.BACKBONE.OUT_CHANNELS,
+    #                          bias=True).to(device)
     else:
-        raise Exception(f"[SHELLEY] Invalid backbone: {backbone}")
+        raise Exception(f"[SHELLEY] Invalid backbone: {backbone}.")
     
-    # Init Head.
+    # Head
     if head == 'common':
         model = Common(backbone=backbone_model, cfg=cfg).to(device)
     elif head == 'stablegm':
@@ -58,23 +63,28 @@ def assemble_model(head: str, backbone: str, cfg: dict, device: torch.device = '
     return model
 
 
-    
-
 class SHELLEY(NetworkAlignmentModel):
     def __init__(self, source_dataset, target_dataset, args):
         self.source_dataset = source_dataset
         self.target_dataset = target_dataset
         self.train_eval_dict = args.train_dict
         self.use_pretrained = args.use_pretrained
-        self.skip_train = args.skip_train
         self.seed = args.seed
-        self.gt_mat = torch.from_numpy(load_gt(self.train_eval_dict, source_dataset.id2idx, target_dataset.id2idx, 'matrix'))
+        self.gt_mat = torch.from_numpy(
+            load_gt(self.train_eval_dict,
+                    source_dataset.id2idx,
+                    target_dataset.id2idx,
+                    'matrix'))
         self.S = None
 
         if args.eval:
             # split the training dictionary in half and use the
             # first half for training and second for evalutation 
-            gt_dict = load_gt(self.train_eval_dict, source_dataset.id2idx, target_dataset.id2idx, 'dict')
+            gt_dict = load_gt(
+                self.train_eval_dict,
+                source_dataset.id2idx,
+                target_dataset.id2idx,
+                'dict')
             train_dict, eval_dict = shuffle_and_split(gt_dict, seed=self.seed)
             
             # train:
@@ -91,28 +101,30 @@ class SHELLEY(NetworkAlignmentModel):
             self.gt_train_dict = {self.source_dataset.id2idx[k]: self.target_dataset.id2idx[v] for k,v in gt_train.items()}
             self.source_train_nodes = np.array(list(self.gt_train_dict.keys()))
 
-        # Set device:
+        # Set device
         self.device = torch.device('cuda:0' if (torch.cuda.is_available() and args.cuda is True) else 'cpu')
 
-        # Models configurations:
+        # Models configurations
         self.cfg = edict()
 
-        # Data:
+        # Data
         self.cfg.DATA = edict()
         self.cfg.DATA.ROOT_DIR = args.root_dir 
         self.cfg.DATA.NAME = args.root_dir.split('/')[-1]
         self.cfg.DATA.P_ADD = args.p_add 
         self.cfg.DATA.P_RM = args.p_rm
 
-        # Backbone:
+        # Backbone
         self.cfg.BACKBONE = edict()
         self.cfg.BACKBONE.NAME = args.backbone
 
         if args.backbone == 'gin':
-            self.cfg.BACKBONE.NODE_FEATURE_DIM = args.node_feature_dim
-            self.cfg.BACKBONE.DIM = args.dim
-            self.cfg.BACKBONE.OUT_CHANNELS = args.dim
-            # self.cfg.backbone.miss_match_value = args.miss_match_value
+            self.cfg.BACKBONE.IN_CHANNELS = args.node_feature_dim
+            self.cfg.BACKBONE.DIM = args.embedding_dim
+            self.cfg.BACKBONE.OUT_CHANNELS = args.embedding_dim
+        elif args.backbone == 'pale_linear':
+            self.cfg.BACKBONE.IN_CHANNELS = args.node_feature_dim
+            self.cfg.BACKBONE.OUT_CHANNELS = args.embedding_dim
         else:
             raise Exception(f"Invalid backbone: {self.backbone}.")
         
@@ -129,20 +141,20 @@ class SHELLEY(NetworkAlignmentModel):
         #     self.cfg.BACKBONE.TRAIN.BATCH_SIZE = args.backbone_batchsize # do not perform mini-batching if `args.batchsize` == -1
         #     self.cfg.BACKBONE.TRAIN.LOSS = args.backbone_loss
         
-        # Head:
+        # Head
         self.cfg.HEAD = edict()
         self.cfg.HEAD.NAME = args.head
-
+        self.cfg.HEAD.DEVICE = self.device
         if args.head == 'sigma':
             pass # TODO
         elif args.head == 'common':
             self.cfg.HEAD.DISTILL = args.distill
             self.cfg.HEAD.MOMENTUM = args.distill_momentum
-            # retrieve warmup_step from the `batchsize` argument if `args.warmup_step` == -1
-            self.cfg.HEAD.WARMUP_STEP = len(self.source_train_nodes) // args.batchsize if args.warmup_step == -1 else args.warmup_step 
+            self.cfg.HEAD.WARMUP_STEP = args.warmup_step 
             self.cfg.HEAD.EPOCH_ITERS = args.epoch_iters
             self.cfg.HEAD.ALPHA = args.alpha
             self.cfg.HEAD.SOFTMAX_TEMP = args.softmax_temp
+            self.cfg.HEAD.FEATURE_CHANNEL = args.feature_channel
         elif args.head == 'stablegm':
             self.cfg.HEAD.FEATURE_CHANNEL = args.feature_channel
             self.cfg.HEAD.SK_ITER_NUM = args.sk_iter_num
@@ -153,6 +165,7 @@ class SHELLEY(NetworkAlignmentModel):
         
         # Training
         self.cfg.TRAIN = edict()
+        self.cfg.TRAIN.TRAIN = args.train
         self.cfg.TRAIN.SELF_SUPERVISED = args.self_supervised  # if True do not use the target graphs in the dataset, but generate a random graph 'on the fly'
         self.cfg.TRAIN.OPTIMIZER = args.optimizer
         self.cfg.TRAIN.MOMENTUM = args.optim_momentum 
@@ -165,7 +178,7 @@ class SHELLEY(NetworkAlignmentModel):
         self.cfg.TRAIN.START_EPOCH = args.start_epoch
         self.cfg.TRAIN.NUM_EPOCHS = args.num_epochs
         self.cfg.TRAIN.EPOCH_ITERS = args.epoch_iters
-        self.cfg.TRAIN.BATCH_SIZE = len(self.source_train_nodes) if args.batchsize == -1 else args.batchsize # do not perform mini-batching if `args.batchsize` == -1
+        self.cfg.TRAIN.BATCH_SIZE = args.batchsize # do not perform mini-batching if `args.batchsize` == -1
         self.cfg.TRAIN.LOSS_FUNC = args.loss_func
         self.cfg.TRAIN.STATISTIC_STEP = args.statistic_step 
         self.cfg.TRAIN.EARLY_STOPPING = args.early_stopping 
@@ -173,6 +186,7 @@ class SHELLEY(NetworkAlignmentModel):
 
         # Evaluation
         self.cfg.EVAL = edict()
+        self.cfg.EVAL.TEST = args.test
         self.cfg.EVAL.VALIDATE = args.validate      # Validation during training
         self.cfg.EVAL.VAL_ITERS = args.val_iters
         self.cfg.EVAL.TEST_ITERS = args.test_iters
@@ -218,19 +232,13 @@ class SHELLEY(NetworkAlignmentModel):
                                             num_workers=4)
                         for x in ('train', 'val', 'test')}
 
-        # Train model.
-        if not self.skip_train:
+        # Train and eval model
+        if self.cfg.TRAIN.TRAIN:
             self.train_eval_model()
         
-        # # Get final alignment.
-        # self.model.eval()
-
-        # inputs = edict()
-        # inputs.pyg_graphs = [self.source_graph, self.target_graph]
-        # inputs.ns = [self.source_graph.num_nodes, self.target_graph.num_nodes]
-
-        # outputs = self.model(inputs, training=False)
-        # self.S = outputs.perm_mat.detach().cpu().numpy()
+        # Test model
+        if self.cfg.EVAL.TEST:
+            test_acc = self.eval_model(mode='test')
 
         return self.S
 
@@ -239,12 +247,12 @@ class SHELLEY(NetworkAlignmentModel):
         """
         Train the model.
         """
-
-        # ------------------
-        # Configure training
-        # ------------------
-
-        # Loss function.
+        
+        # ------------------------ 
+        #  Training configuration
+        # ------------------------
+        
+        # Loss function
         if self.cfg.TRAIN.LOSS_FUNC.lower() == 'cml':
             self.criterion = ContrastiveLossWithAttention()
         elif self.cfg.TRAIN.LOSS_FUNC.lower() == 'distill_qc':
@@ -254,7 +262,7 @@ class SHELLEY(NetworkAlignmentModel):
         else:
             raise Exception(f"[SHELLEY] Invalid loss function: {self.cfg.TRAIN.LOSS_FUNC.lower()}.")
         
-        # Get model parameters.
+        # Get model parameters
         if self.cfg.TRAIN.SEPARATE_BACKBONE_LR:
             backbone_ids = [id(item) for item in self.model.backbone_params]
             other_params = [param for param in self.model.parameters() if id(param) not in backbone_ids]
@@ -267,7 +275,7 @@ class SHELLEY(NetworkAlignmentModel):
         else:
             model_params = self.model.parameters()
         
-        # Optimizer.
+        # Optimizer
         if self.cfg.TRAIN.OPTIMIZER.lower() == 'sgd':
             self.optimizer = optim.SGD(model_params, lr=self.cfg.TRAIN.LR, momentum=self.cfg.TRAIN.MOMENTUM, nesterov=True)
         elif self.cfg.TRAIN.OPTIMIZER.lower() == 'adam':
@@ -275,7 +283,7 @@ class SHELLEY(NetworkAlignmentModel):
         else:
             raise ValueError(f"Unknown optimizer: {self.cfg.TRAIN.OPTIMIZER}.")
         
-        # Scheduler.
+        # Scheduler
         if self.cfg.TRAIN.USE_SCHEDULER:
             self.scheduler = optim.lr_scheduler.MultiStepLR(
                 self.optimizer,
@@ -283,10 +291,22 @@ class SHELLEY(NetworkAlignmentModel):
                 gamma=self.cfg.TRAIN.LR_DECAY,
                 last_epoch=self.cfg.TRAIN.START_EPOCH - 1
             )
+
+        # Number of iterations per epoch
+        if self.cfg.TRAIN.EPOCH_ITERS < 0:
+            # Iterate all over the training dataset
+            self.cfg.TRAIN.EPOCH_ITERS = len(self.dataloader['train'])
+            print('[SHELLEY] epoch_iters: ', self.cfg.TRAIN.EPOCH_ITERS)
+
+            if self.cfg.HEAD.NAME == 'common':
+                if self.cfg.HEAD.WARMUP_STEP < 0:
+                    # Set the warmup steps equal to the epoch iterations
+                    self.cfg.HEAD.WARMUP_STEP = self.cfg.TRAIN.EPOCH_ITERS
+                    print('[SHELLEY] warmup_step: ', self.cfg.TRAIN.EPOCH_ITERS)
         
-        # ---------------
-        # Train/Eval loop
-        # ---------------
+        # -------------------
+        #  Train / eval loop
+        # -------------------
         print("Start training...")
         since = time.time()
         start_epoch = self.cfg.TRAIN.START_EPOCH
@@ -333,7 +353,7 @@ class SHELLEY(NetworkAlignmentModel):
             if self.cfg.TRAIN.USE_SCHEDULER:
                 self.scheduler.step()
         
-        # Compute elapsed training time.
+        # Compute elapsed training time
         time_elapsed = time.time() - since 
         hours = time_elapsed // 3600
         minutes = (time_elapsed // 60) % 60
@@ -348,7 +368,7 @@ class SHELLEY(NetworkAlignmentModel):
     
 
     def train_one_epoch(self, epoch):
-        # Set model to training mode.
+        # Set model to training mode
         self.model.train()
 
         print('lr = ' + ', '.join(['{:.2e}'.format(x['lr']) for x in self.optimizer.param_groups]))
@@ -367,7 +387,7 @@ class SHELLEY(NetworkAlignmentModel):
                 break
             
             # Move data to correct device
-            if self.model.device != torch.device('cpu'):
+            if self.device != torch.device('cpu'):
                 inputs = data_to_cuda(inputs)
             
             iter_num += 1
@@ -393,7 +413,7 @@ class SHELLEY(NetworkAlignmentModel):
                 # Compute accuracy
                 acc = matching_accuracy(outputs['perm_mat'], outputs['gt_perm_mat'], outputs['ns'], idx=0)[0]
 
-                # Backward + Optimize:
+                # Backward step
                 loss.backward()
                 self.optimizer.step()
 
@@ -451,7 +471,7 @@ class SHELLEY(NetworkAlignmentModel):
                 eval_iter_num += 1
 
                 # Forward step
-                eval_outputs = self.model(eval_inputs)
+                eval_outputs = self.model(eval_inputs, training=False)
 
                 # Compute accuracy
                 eval_acc += matching_accuracy(eval_outputs['perm_mat'], eval_outputs['gt_perm_mat'], eval_outputs['ns'], idx=0)[0].item()

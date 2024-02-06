@@ -17,10 +17,17 @@ python network_alignment.py \
 --groundtruth ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.test.dict \
 SHELLEY \
 --cuda \
---root_dir dataspace/edi3 \
---p_add 0.2 \
---p_rm 0.2 \
---lr 0.000003 \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
---optimizer sgd \
---use_scheduler
+--root_dir dataspace/edi3 \
+--head common \
+--backbone gin \
+--loss_func distill_qc \
+--batchsize 4 \
+--p_add 0.1 \
+--p_rm 0.0 \
+--alpha 0.4 \
+--optimizer adam \
+--use_scheduler \
+--train \
+--validate \
+--test

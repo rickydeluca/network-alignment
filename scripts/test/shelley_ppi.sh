@@ -19,8 +19,15 @@ SHELLEY \
 --cuda \
 --train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
 --root_dir dataspace/ppi \
+--head stablegm \
+--backbone gin \
+--loss_func cml \
+--batchsize 2 \
 --p_add 0.0 \
---p_rm 0.1 \
---train_dict ${PD}/${PREFIX}/dictionaries/node,split=${TRAINRATIO}.train.dict \
+--p_rm 0.0 \
+--alpha 0.4 \
 --optimizer adam \
---use_scheduler
+--use_scheduler \
+--train \
+--validate \
+--test

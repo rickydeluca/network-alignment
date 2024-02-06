@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from algorithms.SHELLEY.model.spinal_cord import InnerProduct , InnerProductWithWeightsAffinity
+from algorithms.SHELLEY.model.affinity_layer import InnerProduct, InnerProductWithWeightsAffinity
+from algorithms.SHELLEY.model.sconv_archs import SiameseSConvOnNodes, SiameseNodeFeaturesToEdgeFeatures
 from algorithms.SHELLEY.model.loss import Distill_InfoNCE, Distill_QuadraticContrast
 from algorithms.SHELLEY.utils.lap_solvers.hungarian import hungarian
 from algorithms.SHELLEY.utils.lap_solvers.sinkhorn import Sinkhorn
@@ -68,14 +69,19 @@ class CommonMidbone(nn.Module):
         self.cfg = cfg
         self.backbone = backbone
         self.backbone_params = backbone.parameters()
+        
+        self.message_pass_node_features = SiameseSConvOnNodes(input_node_dim=cfg.HEAD.FEATURE_CHANNEL * 3)
+        self.build_edge_features_from_node_features = SiameseNodeFeaturesToEdgeFeatures(
+            total_num_nodes=self.message_pass_node_features.num_node_features
+        )
         self.vertex_affinity = InnerProduct(backbone.num_node_features)
         self.logit_scale = torch.nn.Parameter(torch.ones([]) * np.log(1 / self.cfg.HEAD.SOFTMAX_TEMP))
         self.projection = nn.Sequential(
-            nn.Linear(backbone.num_node_features*6, backbone.num_node_features*6, bias=True),
-            nn.BatchNorm1d(backbone.num_node_features*6),
+            nn.Linear(backbone.out_dimension, backbone.out_dimension, bias=True),
+            nn.BatchNorm1d(backbone.out_dimension),
             nn.ReLU(),
-            nn.Linear(backbone.num_node_features*6, 256, bias=True),
-            nn.BatchNorm1d(256),
+            nn.Linear(backbone.out_dimension, backbone.num_node_features, bias=True),
+            nn.BatchNorm1d(backbone.num_node_features),
             nn.ReLU()
         )
         
@@ -91,19 +97,18 @@ class CommonMidbone(nn.Module):
         num_graphs = data_dict['num_graphs']
         orig_graph_list = []
 
-        for _graph, n_p in zip(graphs, n_points):
+        for graph, n_p in zip(graphs, n_points):
             # Extract the feature using the backbone
-            if self.cfg.BACKBONE.NAME == 'gin':
-                graph = _graph.clone()
-                graph, _ = self.backbone(graph) # Discar old node features
-                node_features = graph.x
-
-                # Unroll the graph in the batch
-                orig_graphs = graph.to_data_list()
-                orig_graph_list.append(orig_graphs)
-
+            if self.cfg.BACKBONE.NAME in ['gin', 'pale_linear']:
+                node_features = self.backbone(graph).to(self.cfg.HEAD.DEVICE)
             else:
                 raise Exception(f"Invalid backbone: {self.cfg.BACKBONE.NAME}")
+            
+            # GNN
+            graph.x = node_features
+            graph = self.message_pass_node_features(graph.to(self.cfg.HEAD.DEVICE))
+            orig_graph = self.build_edge_features_from_node_features(graph)
+            orig_graph_list.append(orig_graph)
 
         # Compute the affinity matrices between source and target graphs
         unary_affs_list = [
@@ -162,7 +167,7 @@ class CommonMidbone(nn.Module):
                 Kp = torch.stack(pad_tensor(unary_affs), dim=0)
 
                 # Conduct hungarian matching to get the permutation matrix for evaluation
-                x = hungarian(Kp,n_points[idx1], n_points[idx2])
+                x = hungarian(Kp, n_points[idx1], n_points[idx2])
                 x_list.append(x)
             return node_feature_list, x_list
 
@@ -259,7 +264,7 @@ class Common(nn.Module):
                 param_m.data = param_m.data * self.momentum + param.data * (1. - self.momentum)
 
 
-class StableGMMidbone(nn.Module):
+class _StableGMMidbone(nn.Module):
     def __init__(self, backbone, cfg) -> None:
         """
         Args
@@ -269,7 +274,7 @@ class StableGMMidbone(nn.Module):
             cfg:        Configuration dictionary (dict of dicts) with the
                         parameter configuration.
         """
-        super(StableGMMidbone, self).__init__()
+        super(_StableGMMidbone, self).__init__()
         self.cfg = cfg
         self.backbone = backbone
 
@@ -282,7 +287,7 @@ class StableGMMidbone(nn.Module):
         return
 
 
-class StableGM(nn.Module):
+class _StableGM(nn.Module):
     def __init__(self, backbone, cfg):
         """
         Args
@@ -294,7 +299,7 @@ class StableGM(nn.Module):
         """
         super(StableGM, self).__init__()
         self.cfg = cfg
-        self.midbone = StableGMMidbone(backbone)
+        self.midbone = _StableGMMidbone(backbone)
 
         # TODO
         # ...
@@ -303,3 +308,76 @@ class StableGM(nn.Module):
         # TODO
         # ...
         return
+    
+
+class StableGM(torch.nn.Module):
+    def __init__(self, backbone, cfg):
+        super(StableGM, self).__init__()
+        self.cfg = cfg              # Configuration dicrionary
+        self.backbone = backbone    # Backbone model
+        self.global_state_dim = self.cfg.HEAD.FEATURE_CHANNEL
+        self.vertex_affinity = InnerProductWithWeightsAffinity(self.global_state_dim, self.backbone.num_node_features)
+        self.sinkhorn = Sinkhorn(max_iter=self.cfg.HEAD.SK_ITER_NUM, epsilon=self.cfg.HEAD.SK_EPSILON, tau=self.cfg.HEAD.SK_TAU)
+
+    def forward(
+        self,
+        data_dict,
+    ):
+        # Read input dictionary
+        graphs = data_dict['pyg_graphs']
+        n_points = data_dict['ns']
+        batch_size = data_dict['batch_size']
+        num_graphs = data_dict['num_graphs']
+        
+
+        if 'gt_perm_mat' in data_dict:
+            gt_perm_mats = [data_dict['gt_perm_mat']]
+        else:
+            raise ValueError('Ground truth information is required during training.')
+
+        global_list = []
+        orig_graph_list = []
+        for n_p, _graph in zip(n_points, graphs):
+            # Generate node features using the backbone
+            graph = _graph.clone()
+            node_features = self.backbone(graph)
+            graph.x = node_features
+
+            # Unroll the graph in the batch
+            orig_graphs = graph.to_data_list()
+            orig_graph_list.append(orig_graphs)
+            
+       
+        global_weights_list = [torch.cat([global_src, global_tgt], axis=-1) for global_src, global_tgt in lexico_iter(global_list)]
+        global_weights_list = [normalize_over_channels(g) for g in global_weights_list]
+
+        sinkhorn_similarities = []
+
+        for (g_1, g_2), global_weights,(ns_src, ns_tgt) in zip(lexico_iter(orig_graph_list), global_weights_list,lexico_iter(n_points)):
+            similarity=self.vertex_affinity([item.x for item in g_1], [item.x for item in g_2], global_weights)
+            ns_srcs = ns_src
+            ns_tgts = ns_tgt
+            
+            for i in range(len(similarity)):
+                if(ns_srcs[i]==ns_tgts[i]):
+                    s = self.sinkhorn(similarity[i], None, None,True)
+                else:
+                    s = self.sinkhorn(similarity[i], ns_srcs[i], ns_tgts[i],True)
+                sinkhorn_similarities.append(s)
+                    
+        # Determine maximum length
+        max_len_0 = max([x.size(dim=0) for x in sinkhorn_similarities])
+        max_len_1= max([x.size(dim=1) for x in sinkhorn_similarities])
+        
+        # Pad all tensors to have same length
+        sinkhorn_similarities = [torch.nn.functional.pad(x, pad=(0, max_len_0 - x.size(dim=0),0,max_len_1-x.size(dim=1)), mode='constant', value=0) for x in sinkhorn_similarities]
+        ss = torch.stack(sinkhorn_similarities)
+    
+        perm_mat_np =stable_marriage(ss, n_points[0], n_points[1])
+        data_dict.update({
+            'ds_mat': ss,
+            'cs_mat': ss,
+            'perm_mat':perm_mat_np,
+        })
+        
+        return data_dict

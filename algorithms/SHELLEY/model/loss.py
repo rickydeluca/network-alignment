@@ -360,13 +360,6 @@ class Distill_InfoNCE(nn.Module):
         sim_1to2 = dynamic_temperature.exp() * graph1_feat @ graph2_feat.T
         sim_2to1 = dynamic_temperature.exp() * graph2_feat @ graph1_feat.T
 
-        # DEBUG
-        # print('[LOSS] graph1_feat:', graph1_feat.shape)
-        # print('[LOSS] graph2_feat:', graph2_feat.shape)
-        # print('[LOSS] groundtruth:', groundtruth.shape)
-        # print('[LOSS] sim_1to2:', sim_1to2.shape)
-        # print('[LOSS] sim_2to1:', sim_2to1.shape)
-
         # get momentum features
         with torch.no_grad():
             graph1_feat_m = F.normalize(feature_m[0], dim=-1)
@@ -450,11 +443,7 @@ class ContrastiveLossWithAttention(nn.Module):
     """
     def __init__(self):
         super(ContrastiveLossWithAttention, self).__init__()
-    
-    
-       
         
-
     def forward(self, pred_dsmat: Tensor, gt_perm: Tensor, src_ns: Tensor, tgt_ns: Tensor, beta_value) -> Tensor:
         
         batch_num = pred_dsmat.shape[0]

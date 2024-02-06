@@ -75,7 +75,7 @@ def random_clone_synthetic_shelley(dataset,
             u, v = random_edge
             edges_add.append((idx2id[u], idx2id[v]))
 
-    # Add the new edgescount_rm to the graph.
+    # Add the new edges to the graph.
     if weighted:
         H.add_weighted_edges_from(edges_add)
     else:
