@@ -43,7 +43,8 @@ def compute_edge_metric(G, metric):
 
 class GMSemiSyntheticDataset(Dataset):
     def __init__(self, root_dir, p_add=0.0, p_rm=0.0,
-                 self_supervised=False, size=100, seed=42):
+                 self_supervised=False, size=100,
+                 split_ratio=0.2, seed=42):
         
         super(GMSemiSyntheticDataset, self).__init__()
 
@@ -51,6 +52,7 @@ class GMSemiSyntheticDataset(Dataset):
         self.p_add = p_add                      # if -1, use all probs
         self.p_rm = p_rm                        # if -1, use all probs
         self.self_supervised = self_supervised  # generate a random target graph 'on-the-fly'
+        self.split_ratio = split_ratio          # train/test split for the groundtruth alignments
         self.seed = seed 
         
         if not self_supervised:
@@ -126,17 +128,12 @@ class GMSemiSyntheticDataset(Dataset):
         if contains_self_loops(target_pyg.edge_index):
             target_pyg.edge_index, target_pyg.edge_attr = remove_self_loops(target_pyg.edge_index, target_pyg.edge_attr)
             
-        # Build the groundtruth matrix
+        # Build the groundtruth alignment matrix
         gt_perm_mat = torch.zeros((source_pyg.num_nodes, target_pyg.num_nodes), dtype=torch.float)
         for s, t in enumerate(node_perm):   # `node_perm` contains the order of original nodes after shuffling
             gt_perm_mat[s, t] = 1
-        
-        # Build the groundtruth permuted index tensor
-        source_indices = torch.arange(0, source_pyg.num_nodes)
-        target_indices = node_perm
-        gt_perm_edge_index = torch.stack((source_indices, target_indices))
-        
-        return target_pyg, gt_perm_mat, gt_perm_edge_index
+            
+        return target_pyg, gt_perm_mat
     
 
     @staticmethod
@@ -193,6 +190,36 @@ class GMSemiSyntheticDataset(Dataset):
                    
         
         return pyg_graph
+    
+    @staticmethod
+    def train_test_split(matrix, split_ratio=0.2):
+        """
+        Given a matrix of shape (N,M) representing the alignments
+        between the nodes of a source network with the nodes of
+        a target network, split those alignments in two set using
+        the `split_ratio`.
+        """
+        
+        # Get alignment indices
+        gt_indices = torch.argwhere(matrix == 1)
+        num_alignments = gt_indices.shape[0]
+        assert gt_indices.shape == torch.Size([num_alignments, 2]) 
+        
+        # Shuffling
+        shuffled_idx = torch.randperm(num_alignments)
+        gt_indices = gt_indices[shuffled_idx]
+        
+        # Split indices
+        split_size = int(num_alignments * split_ratio)
+        split_sizes = [split_size, num_alignments - split_size]
+        train, test = torch.split(gt_indices, split_sizes, dim=0)
+        
+        # Transpose to have shape:
+        # [N, 2]
+        train = train.t()
+        test = test.t()
+        
+        return train, test
 
 
     def get_pair(self, idx):
@@ -216,10 +243,12 @@ class GMSemiSyntheticDataset(Dataset):
                                            edge_metrics=[])
             
             # Random semi-synthetic pyg target graph
-            target_pyg, gt_perm_mat, gt_perm_edge_index = self.generate_synth_clone(source_pyg,
-                                                                                    p_add=self.p_add,
-                                                                                    p_rm=self.p_rm)
+            target_pyg, gt_perm_mat = self.generate_synth_clone(source_pyg,
+                                                                p_add=self.p_add,
+                                                                p_rm=self.p_rm)
             
+            # Split alignments in train and test subsets
+            train_idx, test_idx = self.train_test_split(gt_perm_mat, split_ratio=self.split_ratio)
             
         else:           
             # Get graph pair
@@ -245,7 +274,9 @@ class GMSemiSyntheticDataset(Dataset):
         n_tgt = target_pyg.num_nodes
         ret_dict = {'pyg_graphs': [source_pyg, target_pyg],
                     'ns': [torch.tensor(x) for x in [n_src, n_tgt]],
-                    'gt_perm_mat': gt_perm_mat}
+                    'gt_perm_mat': gt_perm_mat,
+                    'train_idx': train_idx,
+                    'test_idx': test_idx}
         
         return ret_dict
 
@@ -358,7 +389,8 @@ if __name__ == '__main__':
                                         p_add=0.2,
                                         p_rm=0.2,
                                         self_supervised=True,
-                                        size=100)
+                                        size=100,
+                                        split_ratio=0.2)
     
     print("Full dataset:", len(gm_dataset))
 
@@ -369,7 +401,7 @@ if __name__ == '__main__':
     print('Test', len(test))
 
     # Test dataloader
-    dataloader = get_dataloader(val, batch_size=1)
+    dataloader = get_dataloader(val, batch_size=4)
     for idx, ret in enumerate(dataloader):
         print(f'Iter: {idx}')
         print(ret)

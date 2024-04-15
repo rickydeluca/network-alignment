@@ -15,31 +15,14 @@ def fixed_unigram_candidate_sampler(num_sampled, unique, range_max, distortion, 
     return sampled
 
 
-class EmbeddingModel(nn.Module):
-    def __init__(self):
-        super(EmbeddingModel, self).__init__()
-        
-    def loss(self):
-        """
-        Call the forward step and compute the relative loss.
-        """
-        pass
-    
-    def forward(self):
-        """
-        Compute the forward step and return the embeddings.
-        """
-        pass
 
-
-class PaleEmbedding(EmbeddingModel):
+class PaleEmbedding(torch.nn.Module):
     def __init__(self,
                  n_nodes:int = None,
                  embedding_dim:int = None,
                  deg:np.ndarray = None,
                  neg_sample_size:int = None,
-                 cuda:bool = False,
-                 loss_fn=None):
+                 cuda:bool = False):
 
         """
         Parameters
@@ -60,7 +43,7 @@ class PaleEmbedding(EmbeddingModel):
         self.node_embedding = nn.Embedding(n_nodes, embedding_dim)
         self.deg = deg
         self.neg_sample_size = neg_sample_size
-        self.link_pred_layer = loss_fn
+        self.link_pred_layer = EmbeddingLossFunctions()
         self.n_nodes = n_nodes
         self.use_cuda = cuda
 

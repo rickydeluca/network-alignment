@@ -4,24 +4,25 @@ from time import time
 
 import numpy as np
 import torch
+import yaml
+from easydict import EasyDict as edict
 
 import utils.graph_utils as graph_utils
-from algorithms import (
-    COMMON,
-    FINAL,
-    HDA,
-    IONE,
-    MAGNA,
-    PALE,
-    REGAL,
-    SANE,
-    BigAlign,
-    DeepLink,
-    IsoRank,
-    SHELLEY
-)
+from algorithms import (COMMON, FINAL, HDA, IONE, MAGNA, PALE, REGAL, SANE,
+                        SHELLEY, BigAlign, DeepLink, IsoRank, SIGMA_Aligner)
 from evaluation.metrics import get_statistics
 from input.dataset import Dataset
+
+
+def read_config_file(yaml_file):
+    """
+    Read the yaml configuration file and return it
+    as dictionary.
+    """
+    with open(yaml_file) as f:
+        cfg = edict(yaml.load(f, Loader=yaml.FullLoader))
+
+    return cfg
 
 
 def parse_args():
@@ -33,7 +34,7 @@ def parse_args():
     parser.add_argument('--transpose_alignment_matrix', action="store_true", default=False, help="Transpose the alignment matrix.")
     parser.add_argument('--seed',           default=123,    type=int)
 
-    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA, MAGNA, SANE, COMMON, SHELLEY')
+    subparsers = parser.add_subparsers(dest="algorithm", help='Choose 1 of the algorithm from: IsoRank, FINAL, UniAlign, PALE, DeepLink, REGAL, IONE, HDA, MAGNA, SANE, COMMON, SHELLEY, SIGMA_Aligner')
 
     parser_IsoRank = subparsers.add_parser('IsoRank', help='IsoRank algorithm')
     parser_IsoRank.add_argument('--H',                   default=None, help="Priority matrix")
@@ -206,10 +207,12 @@ def parse_args():
     parser_SHELLEY.add_argument('--root_dir', type=str, default='dataspace/ppi')
     parser_SHELLEY.add_argument('--p_add', type=float, default=0.1)
     parser_SHELLEY.add_argument('--p_rm', type=float, default=0.1)
+    parser_SHELLEY.add_argument('--split_ratio', type=float, default=0.2)
+    parser_SHELLEY.add_argument('--size', type=int, default=100)
 
     parser_SHELLEY.add_argument('--backbone', type=str, default='gin')
-    parser_SHELLEY.add_argument('--node_feature_dim', type=int, default=1)
-    parser_SHELLEY.add_argument('--embedding_dim', type=int, default=256)
+    parser_SHELLEY.add_argument('--node_feature_dim', type=int, default=1025)
+    parser_SHELLEY.add_argument('--embedding_dim', type=int, default=1024)
     parser_SHELLEY.add_argument('--softmax_temp', type=float, default=0.07)
     
     parser_SHELLEY.add_argument('--head', type=str, default='common')
@@ -248,6 +251,11 @@ def parse_args():
 
     parser_SHELLEY.add_argument('--test', action='store_true', default=False)
     parser_SHELLEY.add_argument('--test_iters', type=int, default=100)
+
+    # SIGMA
+    parser_SIGMA = subparsers.add_parser('SIGMA', help='SIGMA algorithm')
+    parser_SIGMA.add_argument('--train_dict', default='dataspace/ppi/dictionaries/node,split=0.2.train.dict')
+    parser_SIGMA.add_argument('-c', '--config', type=str, required=True, help="Path to yaml configuration file.")
 
     return parser.parse_args()
 
@@ -288,6 +296,9 @@ if __name__ == '__main__':
         model = COMMON(source_dataset, target_dataset, args)
     elif algorithm == "SHELLEY":
         model = SHELLEY(source_dataset, target_dataset, args)
+    elif algorithm == "SIGMA":
+        cfg = read_config_file(args.config)
+        model = SIGMA_Aligner(source_dataset, target_dataset, args.train_dict, cfg)
     else:
         raise Exception("Unsupported algorithm")
 

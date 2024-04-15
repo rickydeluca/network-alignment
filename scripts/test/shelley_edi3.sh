@@ -30,4 +30,7 @@ SHELLEY \
 --use_scheduler \
 --train \
 --validate \
---test
+--test \
+--split_ratio 0.2 \
+--size 100 \
+--self_supervised

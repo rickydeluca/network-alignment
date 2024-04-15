@@ -1,0 +1,17 @@
+DEVICE: 'cuda:0'
+
+GIN:
+  NODE_FEATURE_DIM: 1
+  DIM: 256
+
+SIGMA:
+  N_SAMPLES: 10
+  N_SINK_ITER: 10
+  TAU: 1.0
+  T: 5
+  MISS_MATCH_VALUE: 0.01
+
+TRAIN:
+  LR: 1.e-4
+  L2NORM: 1.e-4
+  EPOCHS: 100

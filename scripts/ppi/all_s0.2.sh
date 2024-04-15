@@ -23,7 +23,6 @@ for ER in "${EDGE_REMOVAL[@]}"; do
             "PALE --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict --cuda"
             "IONE --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict"
             "DeepLink --train_dict ${DATA_SPACE}/${PREFIX}/dictionaries/node,split=${TR}.train.dict --cuda"
-            "HDA --vector_size 10000"
         )
 
         # Loop through algorithm configurations

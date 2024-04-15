@@ -97,8 +97,9 @@ class CommonMidbone(nn.Module):
         num_graphs = data_dict['num_graphs']
         orig_graph_list = []
 
-        for graph, n_p in zip(graphs, n_points):
+        for _graph, n_p in zip(graphs, n_points):
             # Extract the feature using the backbone
+            graph = _graph.clone()
             if self.cfg.BACKBONE.NAME in ['gin', 'pale_linear']:
                 node_features = self.backbone(graph).to(self.cfg.HEAD.DEVICE)
             else:
@@ -106,8 +107,7 @@ class CommonMidbone(nn.Module):
             
             # GNN
             graph.x = node_features
-            graph = self.message_pass_node_features(graph.to(self.cfg.HEAD.DEVICE))
-            orig_graph = self.build_edge_features_from_node_features(graph)
+            orig_graph = graph.to_data_list()
             orig_graph_list.append(orig_graph)
 
         # Compute the affinity matrices between source and target graphs
@@ -198,7 +198,7 @@ class Common(nn.Module):
         self.model_pairs = [[self.online_net, self.momentum_net]]
         self.copy_params()  # Initialize the momentum network
 
-    def forward(self, data_dict, training=False, iter_num=0, epoch=0):
+    def forward(self, data_dict, training=False, use_train_subset=False, use_test_subset=False, iter_num=0, epoch=0):
         # Compute the distillation weight `alpha`
         if epoch * self.epoch_iters + iter_num >= self.warmup_step:
             alpha = self.cfg.HEAD.ALPHA
@@ -217,7 +217,23 @@ class Common(nn.Module):
                 self._momentum_update()
                 node_feature_m_list = self.momentum_net(data_dict, online=False)
 
-            # Loss function
+            if use_train_subset is True:
+                # Extract only the features of the node 
+                # designed for training.
+                source_idx = data_dict['train_idx'][:, 0]
+                target_idx = data_dict['train_idx'][:, 1]
+                
+                node_feats_dim = node_feature_list[0][source_idx].size(-1)
+                
+                source_features = node_feature_list[0][source_idx].reshape(-1, node_feats_dim)
+                target_features = node_feature_list[1][target_idx].reshape(-1, node_feats_dim)
+                node_feature_list = [source_features, target_features]
+                
+                source_m_features = node_feature_m_list[0][source_idx].reshape(-1, node_feats_dim)
+                target_m_features = node_feature_m_list[1][target_idx].reshape(-1, node_feats_dim)
+                node_feature_m_list = [source_m_features, target_m_features]
+
+            # Loss function            
             if self.cfg.TRAIN.LOSS_FUNC == 'distill_qc':
                 contrastloss = Distill_InfoNCE()
                 loss = contrastloss(node_feature_list, node_feature_m_list, alpha,
@@ -227,22 +243,72 @@ class Common(nn.Module):
                 loss = loss + crossloss(node_feature_list, node_feature_m_list, 
                                         self.online_net.logit_scale, self.momentum_net.logit_scale)
                 
-                # update data dictionary
-                data_dict.update({
-                    'perm_mat': x_list[0],
-                    'loss': loss,
-                    'ds_mat': None
-                })
+                # Update data dictionary
+                if use_train_subset is True:                    
+                    # Extract submatrix using indices
+                    source_indices = data_dict['train_idx'][:, 0, :]
+                    target_indices = data_dict['train_idx'][:, 1, :]
+                    batch_size = data_dict['train_idx'].size(0)
+                    num_subset_nodes = data_dict['train_idx'].size(-1)
+
+                    # Create meshgrid of row and column indices
+                    row_indices = torch.arange(batch_size).view(-1, 1).expand(batch_size, num_subset_nodes)
+                    train_perm_mat = x_list[0][row_indices, source_indices, target_indices]
+                    train_gt_perm_mat = data_dict['gt_perm_mat'][row_indices, source_indices, target_indices]
+                    
+                    train_ns = []
+                    for _ in range(len(data_dict['ns'])):
+                        train_ns.append(source_idx.size(-1))
+                    
+                    data_dict.update({
+                        'train_ns': train_ns,
+                        'train_perm_mat': train_perm_mat,
+                        'train_gt_perm_mat': train_gt_perm_mat,
+                        'loss': loss,
+                        'ds_mat': None
+                    })
+                    
+                else:
+                    data_dict.update({
+                        'perm_mat': x_list[0],
+                        'loss': loss,
+                        'ds_mat': None
+                    })
             
             else:
                 raise Exception(f"[COMMON] Invalid loss function: {self.cfg.TRAIN.LOSS_FUNC}")
         
-        else:
-            # If no training, directly output the result
-            data_dict.update({
-                'perm_mat': x_list[0],
-                'ds_mat': None
-            })
+        else:   # If no training, directly output the result
+
+            if use_test_subset is True:
+                
+                # Extract submatrix using indices
+                source_indices = data_dict['test_idx'][:, 0, :]
+                target_indices = data_dict['test_idx'][:, 1, :]
+                batch_size = data_dict['test_idx'].size(0)
+                num_subset_nodes = data_dict['test_idx'].size(-1)
+
+                # Create meshgrid of row and column indices
+                row_indices = torch.arange(batch_size).view(-1, 1).expand(batch_size, num_subset_nodes)
+                test_perm_mat = x_list[0][row_indices, source_indices, target_indices]
+                test_gt_perm_mat = data_dict['gt_perm_mat'][row_indices, source_indices, target_indices]
+                
+                test_ns = []
+                for _ in range(len(data_dict['ns'])):
+                    test_ns.append(source_idx.size(-1))
+                
+                data_dict.update({
+                    'test_ns': test_ns,
+                    'test_perm_mat': test_perm_mat,
+                    'test_gt_perm_mat': test_gt_perm_mat,
+                    'ds_mat': None
+                })
+            
+            else:    
+                data_dict.update({
+                    'perm_mat': x_list[0],
+                    'ds_mat': None
+                })
 
         return data_dict
         

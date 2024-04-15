@@ -10,6 +10,7 @@ from algorithms.MAGNA import MAGNA
 from algorithms.SANE import SANE
 from algorithms.COMMON import COMMON
 from algorithms.SHELLEY import SHELLEY
+from algorithms.SIGMA import SIGMA_Aligner
 
-__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE', 'HDA', 'MAGNA', 'SANE', 'COMMON', 'SHELLEY']
+__all__ = ['BigAlign', 'DeepLink', 'FINAL', 'IONE', 'IsoRank', 'REGAL', 'PALE', 'HDA', 'MAGNA', 'SANE', 'COMMON', 'SHELLEY', 'SIGMA_Aligner']
 

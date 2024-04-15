@@ -1,3 +1,7 @@
+"""
+Train and eval using the whole networks.
+"""
+
 import time
 
 import numpy as np
@@ -7,7 +11,7 @@ from easydict import EasyDict as edict
 from torch.utils.data import random_split
 
 from algorithms.network_alignment_model import NetworkAlignmentModel
-from algorithms.SHELLEY.model.backbone import GIN
+from algorithms.SHELLEY.model.backbone import GIN, PaleEmbedding
 from algorithms.SHELLEY.model.head import Common, StableGM
 from algorithms.SHELLEY.model.loss import ContrastiveLossWithAttention
 from algorithms.SHELLEY.utils.data_to_cuda import data_to_cuda
@@ -44,10 +48,12 @@ def assemble_model(head: str, backbone: str, cfg: dict, device: torch.device = '
                              out_channels=cfg.BACKBONE.OUT_CHANNELS,
                              dim=cfg.BACKBONE.DIM,
                              bias=True).to(device)
-    # elif backbone == 'pale_linear':
-    #     backbone_model = PaleLinear(in_channels=cfg.BACKBONE.IN_CHANNELS,
-    #                          out_channels=cfg.BACKBONE.OUT_CHANNELS,
-    #                          bias=True).to(device)
+    elif backbone == 'pale':
+        backbone_model = PaleEmbedding(n_nodes=cfg.BACKBONE.N_NODES,
+                                       embedding_dim=cfg.BACKBONE.EMBEDDING_DIM,
+                                       deg=cfg.BACKBONE.DEG,
+                                       neg_sample_size=cfg.BACKBONE.NEG_SAMPLE_SIZE,
+                                       cuda=cfg.CUDA).to(device)
     else:
         raise Exception(f"[SHELLEY] Invalid backbone: {backbone}.")
     
@@ -231,6 +237,10 @@ class SHELLEY(NetworkAlignmentModel):
                                             seed=self.seed,
                                             num_workers=4)
                         for x in ('train', 'val', 'test')}
+        
+                
+        # Learn embeddings
+        self.learn_embeddings()
 
         # Train and eval model
         if self.cfg.TRAIN.TRAIN:
@@ -241,7 +251,10 @@ class SHELLEY(NetworkAlignmentModel):
             test_acc = self.eval_model(mode='test')
 
         return self.S
-
+    
+    
+    def learn_embeddings(self):
+        return
 
     def train_eval_model(self):
         """
